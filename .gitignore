@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Builds
+dist/
+build/
+.vite/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Tooling caches
+.turbo/
+coverage/
+*.tsbuildinfo
+.vercel/
+.netlify/
+*.local
+
+# OS
+.DS_Store
+
+# Archived production-architecture docs (future implementation — out of MVP scope)
+docs-future-implementation/

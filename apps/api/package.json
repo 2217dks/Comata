@@ -1,0 +1,19 @@
+{
+  "name": "@comata/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@comata/schema": "workspace:*",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.1.5",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
