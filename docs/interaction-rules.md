@@ -79,8 +79,13 @@ Double-click a text/sticky = re-edit.
 - **Ink strokes are click-immune** — clicking a stroke never selects it.
   A marquee/lasso-selected stroke shows a dashed bbox outline and moves with
   the selection.
-- ⌫ deletes the whole selection; ⌘D duplicates it; z-order ops apply to a
-  single selection only.
+- ⌫ deletes the whole selection; ⌘D duplicates it; **⌘C/⌘X/⌘V copy, cut, and
+  paste** (each successive paste stacks further down-right; pasted elements
+  arrive selected); z-order ops apply to a single selection only.
+- **History is per-user (Canva behavior)**: ⌘Z / ⌘⇧Z (or ⌘Y) undo and redo
+  only ever touch THIS session's changes — collaborators' edits are never
+  reverted by your undo. A whole drag is one undo step; typing bursts merge;
+  each committed gesture starts a fresh entry.
 
 ### Text alignment
 

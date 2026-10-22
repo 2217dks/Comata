@@ -23,6 +23,30 @@ import {
 const ELEMENTS = "elements";
 const META = "meta";
 
+/** Transaction origin for every locally-initiated change. The per-user
+ * UndoManager tracks ONLY this origin (Canva behavior: your undo never
+ * reverts other people's edits), so remote-applied updates — whose origin is
+ * the provider or anything else — stay out of your undo stack. */
+export const LOCAL_ORIGIN = "comata-local";
+
+/** Origin for bulk restores (snapshot load/merge) — never undo-tracked. */
+export const RESTORE_ORIGIN = "comata-restore";
+
+function localTx(ydoc: Y.Doc, fn: () => void): void {
+  ydoc.transact(fn, LOCAL_ORIGIN);
+}
+
+/** A per-user undo/redo manager scoped to the elements graph. Transactions
+ * from the same local session merge while within `captureTimeout` of each
+ * other (so a throttled drag = ONE undo step, a typing burst = one step);
+ * call `stopCapturing()` at gesture boundaries to force a split. */
+export function createUndoManager(ydoc: Y.Doc): Y.UndoManager {
+  return new Y.UndoManager(getElements(ydoc), {
+    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    captureTimeout: 500,
+  });
+}
+
 export function getElements(ydoc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return ydoc.getMap<Y.Map<unknown>>(ELEMENTS);
 }
@@ -71,7 +95,7 @@ export function addElement(
   if (opts?.w !== undefined || opts?.h !== undefined) {
     el = { ...el, w: opts.w ?? el.w, h: opts.h ?? el.h };
   }
-  insert(ydoc, el);
+  localTx(ydoc, () => insert(ydoc, el));
   return el;
 }
 
@@ -85,7 +109,7 @@ export function addLineElement(
   y2: number,
 ): BoardElement {
   const el = createLineElement(kind, uid(), x1, y1, x2, y2, nextZ(ydoc));
-  insert(ydoc, el);
+  localTx(ydoc, () => insert(ydoc, el));
   return el;
 }
 
@@ -96,7 +120,7 @@ export function addInkElement(
   worldPoints: number[],
 ): BoardElement {
   const el = createInkElement(uid(), mode, worldPoints, nextZ(ydoc));
-  insert(ydoc, el);
+  localTx(ydoc, () => insert(ydoc, el));
   return el;
 }
 
@@ -108,7 +132,7 @@ export function addCustomElement(
   init?: { title?: string; prompt?: string; spec?: string },
 ): BoardElement {
   const el = createCustomElement(uid(), x, y, nextZ(ydoc), init);
-  insert(ydoc, el);
+  localTx(ydoc, () => insert(ydoc, el));
   return el;
 }
 
@@ -124,9 +148,11 @@ function countKind(ydoc: Y.Doc, kind: BoardElement["kind"]): number {
 export function updateElement(ydoc: Y.Doc, id: string, patch: ElementPatch): void {
   const yel = getElements(ydoc).get(id);
   if (!yel) return;
-  for (const [key, value] of Object.entries(patch)) {
-    if (value !== undefined) yel.set(key, value);
-  }
+  localTx(ydoc, () => {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) yel.set(key, value);
+    }
+  });
 }
 
 export function duplicateElement(ydoc: Y.Doc, id: string): BoardElement | null {
@@ -135,24 +161,44 @@ export function duplicateElement(ydoc: Y.Doc, id: string): BoardElement | null {
   const parsed = BoardElementSchema.safeParse(Object.fromEntries(raw.entries()));
   if (!parsed.success) return null;
   const copy = cloneElement(parsed.data, uid(), nextZ(ydoc));
-  insert(ydoc, copy);
+  localTx(ydoc, () => insert(ydoc, copy));
   return copy;
 }
 
+/** Paste (or duplicate) a batch of elements with fresh ids and an offset —
+ * one transaction, so the whole paste is a single undo step. */
+export function pasteElements(
+  ydoc: Y.Doc,
+  els: BoardElement[],
+  offset: { x: number; y: number },
+): BoardElement[] {
+  const out: BoardElement[] = [];
+  localTx(ydoc, () => {
+    for (const el of els) {
+      const copy = { ...el, id: uid(), z: nextZ(ydoc), x: el.x + offset.x, y: el.y + offset.y };
+      insert(ydoc, copy);
+      out.push(copy);
+    }
+  });
+  return out;
+}
+
 export function bringToFront(ydoc: Y.Doc, id: string): void {
-  const yel = getElements(ydoc).get(id);
-  if (!yel) return;
-  yel.set("z", nextZ(ydoc));
+  localTx(ydoc, () => {
+    const yel = getElements(ydoc).get(id);
+    if (yel) yel.set("z", nextZ(ydoc));
+  });
 }
 
 export function sendToBack(ydoc: Y.Doc, id: string): void {
-  const yel = getElements(ydoc).get(id);
-  if (!yel) return;
-  let min = Infinity;
-  getElements(ydoc).forEach((other) => {
-    if (other.get("id") !== id) min = Math.min(min, (other.get("z") as number) ?? 0);
+  localTx(ydoc, () => {
+    let min = Infinity;
+    getElements(ydoc).forEach((other) => {
+      if (other.get("id") !== id) min = Math.min(min, (other.get("z") as number) ?? 0);
+    });
+    const yel = getElements(ydoc).get(id);
+    if (yel) yel.set("z", Number.isFinite(min) ? min - 1 : 0);
   });
-  yel.set("z", Number.isFinite(min) ? min - 1 : 0);
 }
 
 /** Move exactly one slot up/down the z stack (Figma's ] / [ behaviour). */
@@ -170,17 +216,19 @@ function shiftZ(ydoc: Y.Doc, id: string, delta: number): void {
   if (idx < 0) return;
   const target = sorted[idx + delta];
   if (!target) return;
-  const ymap = getElements(ydoc);
-  const a = ymap.get(id);
-  const b = ymap.get(target.id);
-  if (!a || !b) return;
-  const za = a.get("z") as number;
-  a.set("z", b.get("z") as number);
-  b.set("z", za);
+  localTx(ydoc, () => {
+    const ymap = getElements(ydoc);
+    const a = ymap.get(id);
+    const b = ymap.get(target.id);
+    if (!a || !b) return;
+    const za = a.get("z") as number;
+    a.set("z", b.get("z") as number);
+    b.set("z", za);
+  });
 }
 
 export function deleteElement(ydoc: Y.Doc, id: string): void {
-  getElements(ydoc).delete(id);
+  localTx(ydoc, () => getElements(ydoc).delete(id));
 }
 
 /** Project the Yjs doc into the plain, sorted element list the renderer consumes. */

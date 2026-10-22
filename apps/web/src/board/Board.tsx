@@ -34,6 +34,10 @@ const MAX_SCALE = 8;
 
 const SWATCHES = ["#6c8cff", "#3ecf8e", "#f5b83d", "#ff6b6b", "#e7eaf0"];
 
+/** In-memory clipboard for copy/paste (elements validated on paste; each
+ * successive paste stacks further down-right, Canva/Figma style). */
+let clipboardEls: BoardElement[] = [];
+
 const TOOL_KEYS: Record<string, { tool: Tool; variant?: ShapeVariant }> = {
   v: { tool: "select" },
   p: { tool: "pen" },
@@ -444,6 +448,10 @@ export function Board({
     setCameraPresence,
     setPresenting,
     duplicateEl,
+    pasteEls,
+    undo,
+    redo,
+    stopCapturing,
     updateEl,
     deleteEl,
     bringElToFront,
@@ -574,6 +582,7 @@ export function Board({
     if (selectedIds.length === 0) return;
     const nids = selectedIds.map((id) => duplicateEl(id)).filter((n): n is string => n !== null);
     if (nids.length > 0) setSelectedIds(nids);
+    stopCapturing();
   };
 
   const deleteSelected = () => {
@@ -581,6 +590,31 @@ export function Board({
     for (const id of selectedIds) deleteEl(id);
     setSelectedIds([]);
     setEditing(null);
+    stopCapturing();
+  };
+
+  // ── Clipboard (⌘C / ⌘X / ⌘V) ───────────────────────────────────────────────
+  const pasteCountRef = useRef(0);
+
+  const copySelected = () => {
+    if (selectedIds.length === 0) return;
+    clipboardEls = board.elements.filter((el) => selectedIds.includes(el.id));
+    pasteCountRef.current = 0;
+  };
+
+  const cutSelected = () => {
+    if (selectedIds.length === 0) return;
+    copySelected();
+    deleteSelected();
+  };
+
+  const pasteClipboard = () => {
+    if (clipboardEls.length === 0) return;
+    const step = Math.min(pasteCountRef.current, 50) + 1;
+    const pasted = pasteEls(clipboardEls, { x: 16 * step, y: 16 * step });
+    pasteCountRef.current = step;
+    if (pasted.length > 0) setSelectedIds(pasted.map((el) => el.id));
+    stopCapturing();
   };
 
   const cancelInteraction = () => {
@@ -629,6 +663,13 @@ export function Board({
         return;
       }
 
+      // Copy works for viewers too (read-only) — everything else mutates.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "c" || e.key === "C")) {
+        e.preventDefault();
+        copySelected();
+        return;
+      }
+
       // Viewers can watch, pan, clear selections, and navigate present mode —
       // but never mutate the board.
       if (readOnly) return;
@@ -656,6 +697,32 @@ export function Board({
       if ((e.metaKey || e.ctrlKey) && (e.key === "d" || e.key === "D")) {
         e.preventDefault();
         duplicateSelected();
+        return;
+      }
+
+      // Undo / redo — per-user history (Canva behavior: your undo never
+      // touches other people's edits).
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (
+        ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "z" || e.key === "Z")) ||
+        ((e.metaKey || e.ctrlKey) && (e.key === "y" || e.key === "Y"))
+      ) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === "x" || e.key === "X")) {
+        e.preventDefault();
+        cutSelected();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === "v" || e.key === "V")) {
+        e.preventDefault();
+        pasteClipboard();
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -954,8 +1021,9 @@ export function Board({
   };
 
   // Commits run on window mouseup — releases outside the stage still finish.
-  const finishRef = useRef<() => void>(() => {});
-  finishRef.current = () => {
+  // Every committed gesture ends with stopCapturing() so the next gesture
+  // starts a fresh undo entry (a whole drag = one undo step).
+  const commitInteraction = () => {
     const it = interactionRef.current;
     interactionRef.current = IDLE;
     setPanning(false);
@@ -1080,6 +1148,11 @@ export function Board({
         return;
       }
     }
+  };
+  const finishRef = useRef<() => void>(() => {});
+  finishRef.current = () => {
+    commitInteraction();
+    stopCapturing();
   };
   useEffect(() => {
     const onUp = () => finishRef.current();
@@ -1746,7 +1819,12 @@ export function Board({
             sticky
           </p>
           <h4>Selection</h4>
-          <p>⌘D duplicate · ⌫ delete · ] forward / [ backward · right-click for more · Esc deselect</p>
+          <p>
+            ⌘D duplicate · ⌘C copy · ⌘X cut · ⌘V paste · ⌫ delete · ] forward / [ backward ·
+            right-click for more · Esc deselect
+          </p>
+          <h4>History</h4>
+          <p>⌘Z undo · ⌘⇧Z redo — your undo only reverts your own changes, never your collaborators'.</p>
           <h4>Ink strokes</h4>
           <p>Strokes ignore clicks — select them by dragging a rectangle around them.</p>
           {kind === "presentation" && (

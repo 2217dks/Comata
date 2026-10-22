@@ -7,11 +7,14 @@ import {
   addInkElement,
   addLineElement,
   bringToFront,
+  createUndoManager,
   deleteElement,
   duplicateElement,
   getElements,
   moveZBackward,
   moveZForward,
+  pasteElements,
+  RESTORE_ORIGIN,
   sendToBack,
   updateElement,
 } from "@comata/crdt";
@@ -57,6 +60,14 @@ export type BoardApi = {
   addInkEl: (mode: "pen" | "highlighter", points: number[]) => BoardElement | null;
   updateEl: (id: string, patch: ElementPatch) => void;
   duplicateEl: (id: string) => string | null;
+  pasteEls: (els: BoardElement[], offset: { x: number; y: number }) => BoardElement[];
+  /** Canva-style per-user history: undo/redo only ever touch THIS session's
+   * changes (the manager tracks the local transaction origin exclusively). */
+  undo: () => void;
+  redo: () => void;
+  /** Split the undo stack at a gesture boundary (call after a committed drag/
+   * create/delete so the next gesture doesn't merge into it). */
+  stopCapturing: () => void;
   bringElToFront: (id: string) => void;
   moveElForward: (id: string) => void;
   moveElBackward: (id: string) => void;
@@ -97,6 +108,7 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
 
   const roomRef = useRef<Room<Presence> | null>(null);
   const ydocRef = useRef<Y.Doc | null>(null);
+  const undoRef = useRef<Y.UndoManager | null>(null);
   const userIdRef = useRef(identity.id);
   const lastCursorSent = useRef(0);
   const lastCameraSent = useRef(0);
@@ -178,6 +190,10 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     elementsMap.observeDeep(onDeep);
     project();
 
+    // Per-user undo/redo (Canva behavior): tracks only transactions with
+    // LOCAL_ORIGIN, so remote edits never enter this session's undo stack.
+    undoRef.current = createUndoManager(ydoc);
+
     const unsubOthers = room.subscribe("others", (ev: unknown) => {
       const others: OtherUser[] = Array.isArray(ev)
         ? (ev as OtherUser[])
@@ -212,11 +228,23 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
       clearInterval(statusTimer);
       unsubOthers();
       elementsMap.unobserveDeep(onDeep);
+      undoRef.current?.destroy();
+      undoRef.current = null;
       leave();
       roomRef.current = null;
       ydocRef.current = null;
     };
   }, [roomId, identity]);
+
+  const undo = useCallback(() => {
+    undoRef.current?.undo();
+  }, []);
+  const redo = useCallback(() => {
+    undoRef.current?.redo();
+  }, []);
+  const stopCapturing = useCallback(() => {
+    undoRef.current?.stopCapturing();
+  }, []);
 
   const setCursor = useCallback((x: number, y: number) => {
     const now = Date.now();
@@ -275,6 +303,14 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     return copy?.id ?? null;
   }, []);
 
+  const pasteEls = useCallback(
+    (els: BoardElement[], offset: { x: number; y: number }) => {
+      const ydoc = ydocRef.current;
+      return ydoc ? pasteElements(ydoc, els, offset) : [];
+    },
+    [],
+  );
+
   const bringElToFront = useCallback((id: string) => {
     if (ydocRef.current) bringToFront(ydocRef.current, id);
   }, []);
@@ -301,7 +337,8 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
   }, []);
 
   const applySnapshot = useCallback((bytes: Uint8Array) => {
-    if (ydocRef.current) Y.applyUpdate(ydocRef.current, bytes);
+    // RESTORE_ORIGIN keeps bulk snapshot loads out of the local undo stack.
+    if (ydocRef.current) Y.applyUpdate(ydocRef.current, bytes, RESTORE_ORIGIN);
   }, []);
 
   return {
@@ -316,6 +353,10 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     addInkEl,
     updateEl,
     duplicateEl,
+    pasteEls,
+    undo,
+    redo,
+    stopCapturing,
     bringElToFront,
     moveElForward,
     moveElBackward,
