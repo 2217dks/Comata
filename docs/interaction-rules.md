@@ -67,6 +67,12 @@ Double-click a text/sticky = re-edit.
 - **Hitboxes are shape-aware (Canva-like)**: lines/arrows answer to their
   **stroke** (segment distance + slack), not their bounding rectangle — in
   Konva (`hitStrokeWidth`) and in the machine's hit tests alike.
+- **The selection overlay equals the hitbox** — for shapes the Transformer box
+  is pinned to the original edge rectangle (an outer border never inflates it);
+  lines/arrows have **no rectangular overlay at all**: a dashed stroke
+  highlight plus two draggable **endpoint handles** (Canva-style) that reshape
+  the element live in any direction (w/h are signed offsets; all bbox math is
+  normalized via `bboxOf`).
 - **Shape borders** have Figma-style alignment — outer / middle / inner — but
   the hitbox is ALWAYS the original rectangle edge: an outer border never
   extends the grab area (an invisible hit shape enforces it).

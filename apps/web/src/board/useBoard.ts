@@ -9,43 +9,17 @@ import {
   bringToFront,
   deleteElement,
   duplicateElement,
+  getElements,
   moveZBackward,
   moveZForward,
-  projectBoard,
   sendToBack,
   updateElement,
 } from "@comata/crdt";
-import type { BoardElement, ElementPatch } from "@comata/elements";
+import { BoardElementSchema, type BoardElement, type ElementPatch } from "@comata/elements";
 import { liveblocksClient } from "../lib/liveblocks";
 import type { Identity } from "../lib/identity";
 
 export type ConnStatus = "connected" | "connecting" | "disconnected";
-
-/** Shallow equality with array-aware comparison (ink points decode to fresh
- * arrays on every projection — compare element-wise). */
-function sameElement(a: BoardElement, b: BoardElement): boolean {
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  for (const k of ka) {
-    const va = (a as Record<string, unknown>)[k];
-    const vb = (b as Record<string, unknown>)[k];
-    if (va === vb) continue;
-    if (Array.isArray(va) && Array.isArray(vb)) {
-      if (va.length !== vb.length) return false;
-      let same = true;
-      for (let i = 0; i < va.length; i++) {
-        if (va[i] !== vb[i]) {
-          same = false;
-          break;
-        }
-      }
-      if (same) continue;
-    }
-    return false;
-  }
-  return true;
-}
 
 export type PeerCamera = { x: number; y: number; scale: number };
 
@@ -143,23 +117,65 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     const ydoc = provider.getYDoc();
     ydocRef.current = ydoc;
 
-    // Project with identity stabilization: an element keeps the same object
-    // reference across updates unless its own fields changed. This is what
-    // makes React.memo on ElementView actually skip re-renders (tldraw-style
-    // per-shape memoization) instead of re-rendering every shape on any edit.
+    // Project with identity stabilization + dirty-id tracking: only elements
+    // whose Y.Map actually changed get re-parsed (the Zod parse is the
+    // expensive part), unchanged elements keep their object references so
+    // memo(ElementView) skips re-render, and a projection with no visible
+    // change skips setState entirely.
     const cache = new Map<string, BoardElement>();
-    const project = () => {
-      const next = projectBoard(ydoc);
-      const out: BoardElement[] = [];
-      for (const el of next) {
-        const prev = cache.get(el.id);
-        out.push(prev && sameElement(prev, el) ? prev : el);
-      }
-      cache.clear();
-      for (const el of out) cache.set(el.id, el);
-      setElements(out);
+    const dirty = new Set<string>();
+    let dirtyAll = true;
+
+    const parseElement = (id: string, raw: Y.Map<unknown>): BoardElement | null => {
+      const parsed = BoardElementSchema.safeParse(Object.fromEntries(raw.entries()));
+      return parsed.success ? parsed.data : null;
     };
-    ydoc.on("update", project);
+
+    const project = () => {
+      const ymap = getElements(ydoc);
+      if (dirtyAll) {
+        cache.clear();
+        ymap.forEach((raw, id) => {
+          const parsed = parseElement(id, raw);
+          if (parsed) cache.set(id, parsed);
+        });
+        dirty.clear();
+        dirtyAll = false;
+      } else if (dirty.size > 0) {
+        for (const id of dirty) {
+          const raw = ymap.get(id);
+          const parsed = raw ? parseElement(id, raw) : null;
+          if (parsed) cache.set(id, parsed);
+          else cache.delete(id);
+        }
+        dirty.clear();
+      } else {
+        return; // nothing changed — don't touch React state at all
+      }
+      const out = [...cache.values()].sort((a, b) => a.z - b.z || a.id.localeCompare(b.id));
+      setElements((prev) =>
+        prev.length === out.length && prev.every((e, i) => e === out[i]) ? prev : out,
+      );
+    };
+
+    const elementsMap = getElements(ydoc);
+    const onDeep = (events: Y.YEvent<unknown>[]) => {
+      for (const ev of events) {
+        if (ev.path.length === 0) {
+          // The elements map itself changed: add/delete of whole elements.
+          for (const id of Array.from((ev as Y.YMapEvent<unknown>).changes.keys.keys())) {
+            dirty.add(id);
+          }
+        } else if (typeof ev.path[0] === "string") {
+          // A field inside one element changed.
+          dirty.add(ev.path[0] as string);
+        } else {
+          dirtyAll = true;
+        }
+      }
+      project();
+    };
+    elementsMap.observeDeep(onDeep);
     project();
 
     const unsubOthers = room.subscribe("others", (ev: unknown) => {
@@ -195,7 +211,7 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     return () => {
       clearInterval(statusTimer);
       unsubOthers();
-      ydoc.off("update", project);
+      elementsMap.unobserveDeep(onDeep);
       leave();
       roomRef.current = null;
       ydocRef.current = null;

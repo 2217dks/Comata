@@ -52,6 +52,17 @@ export function normRect(a: Vec, b: Vec): Rect {
   };
 }
 
+/** Axis-aligned bounding box, normalized for line/arrow elements whose w/h
+ * are signed endpoint offsets (drawing up-left gives negative values). */
+export function bboxOf(el: BoardElement): Rect {
+  return {
+    x: Math.min(el.x, el.x + el.w),
+    y: Math.min(el.y, el.y + el.h),
+    w: Math.abs(el.w),
+    h: Math.abs(el.h),
+  };
+}
+
 /** Shape-aware hit test (Canva-like): line/arrow answer to their **stroke**
  * (segment distance + tolerance), everything else to its bounding box.
  * `tol` is extra slack in world units (callers pass screen-px / scale). */
@@ -62,7 +73,8 @@ export function hitTestElement(el: BoardElement, p: Vec, tol: number): boolean {
       el.strokeWidth / 2 + tol
     );
   }
-  return p.x >= el.x && p.x <= el.x + el.w && p.y >= el.y && p.y <= el.y + el.h;
+  const b = bboxOf(el);
+  return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
 }
 
 function distToSegment(p: Vec, a: Vec, b: Vec): number {
@@ -89,9 +101,10 @@ export function elementAtPoint(elements: BoardElement[], p: Vec, tol: number): B
 /** All elements intersecting a world rect — including ink (marquee selects strokes).
  * Edges are inclusive: a marquee that merely **touches** an element selects it. */
 export function elementsInRect(elements: BoardElement[], r: Rect): BoardElement[] {
-  return elements.filter(
-    (el) => el.x <= r.x + r.w && el.x + el.w >= r.x && el.y <= r.y + r.h && el.y + el.h >= r.y,
-  );
+  return elements.filter((el) => {
+    const b = bboxOf(el);
+    return b.x <= r.x + r.w && b.x + b.w >= r.x && b.y <= r.y + r.h && b.y + b.h >= r.y;
+  });
 }
 
 /** Ray-casting point-in-polygon for the lasso. */
@@ -113,14 +126,15 @@ export function pointInPolygon(p: Vec, poly: Vec[]): boolean {
 export function elementsInLasso(elements: BoardElement[], poly: Vec[]): BoardElement[] {
   if (poly.length < 3) return [];
   return elements.filter((el) => {
-    const x2 = el.x + el.w;
-    const y2 = el.y + el.h;
+    const b = bboxOf(el);
+    const x2 = b.x + b.w;
+    const y2 = b.y + b.h;
     const corners: Vec[] = [
-      { x: el.x, y: el.y },
-      { x: x2, y: el.y },
-      { x: el.x, y: y2 },
+      { x: b.x, y: b.y },
+      { x: x2, y: b.y },
+      { x: b.x, y: y2 },
       { x: x2, y: y2 },
-      { x: el.x + el.w / 2, y: el.y + el.h / 2 },
+      { x: b.x + b.w / 2, y: b.y + b.h / 2 },
     ];
     return corners.some((c) => pointInPolygon(c, poly));
   });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { pickCursorColor } from "@comata/elements";
 import type { MemberRole, NotebookKind } from "@comata/schema";
@@ -77,11 +77,16 @@ export function NotebookPage() {
     );
   }
 
-  const identity: Identity = {
-    id: session.user.id,
-    name: session.user.name || session.user.email,
-    color: pickCursorColor(session.user.id),
-  };
+  const identity = useMemo<Identity>(
+    () => ({
+      id: session.user.id,
+      name: session.user.name || session.user.email,
+      color: pickCursorColor(session.user.id),
+    }),
+    // Stable per session — useBoard tears down the room if this changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session.user.id, session.user.name, session.user.email],
+  );
 
   if (!notebook || !id) {
     return <Spinner label="Opening notebook…" />;

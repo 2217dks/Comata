@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import { Ellipse, Group, Label, Layer, Line, Path, Rect, Stage, Tag, Text, Transformer } from "react-konva";
+import { Ellipse, Group, Label, Layer, Line, Path, Rect, Stage, Tag, Text, Transformer, Circle } from "react-konva";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import type { BoardElement, ElementKind, ElementPatch, TextShape } from "@comata/elements";
@@ -12,6 +12,7 @@ import { ElementView, hasMath, smoothInkPath } from "./ElementView";
 import {
   DRAG_THRESHOLD,
   IDLE,
+  bboxOf,
   elementsInLasso,
   elementsInRect,
   hitTestElement,
@@ -628,6 +629,10 @@ export function Board({
         return;
       }
 
+      // Viewers can watch, pan, clear selections, and navigate present mode —
+      // but never mutate the board.
+      if (readOnly) return;
+
       if (e.key === "]" && selectedIds.length === 1) {
         moveElForward(selectedIds[0] as string);
         return;
@@ -662,7 +667,6 @@ export function Board({
         }
         return;
       }
-      if (readOnly) return;
       const next = TOOL_KEYS[e.key.toLowerCase()];
       if (next) switchTool(next.tool, next.variant);
     };
@@ -683,11 +687,18 @@ export function Board({
 
   // Attach the Transformer to all selected resizable nodes — with multiple
   // selections Konva draws one combined bounding box that scales them all.
+  // Single lines/arrows are excluded: they get Canva-style ENDPOINT handles
+  // (no rectangular selection overlay) instead.
+  const selectedLineEl =
+    selectedEl && (selectedEl.kind === "line" || selectedEl.kind === "arrow") ? selectedEl : null;
+
   const trIds = useMemo(
     () =>
       selectedIds.filter((id) => {
         const el = board.elements.find((e2) => e2.id === id);
-        return el && ELEMENT_REGISTRY[el.kind].resizable;
+        if (!el || !ELEMENT_REGISTRY[el.kind].resizable) return false;
+        if (selectedIds.length === 1 && (el.kind === "line" || el.kind === "arrow")) return false;
+        return true;
       }),
     [selectedIds, board.elements],
   );
@@ -762,6 +773,22 @@ export function Board({
     return false;
   };
 
+  // Canva-style endpoint editing for lines/arrows: dragging a handle rewrites
+  // the geometry live. The fixed anchor comes from the render-scope element
+  // (it never moves during the drag), the moving end from the handle node —
+  // w/h are signed offsets, so dragging to any direction just works.
+  // Handles live on the untransformed selection layer → screen coords in,
+  // world coords out via toWorld.
+  const dragLineEndpoint =
+    (el: BoardElement, end: "start" | "end") => (e: KonvaEventObject<DragEvent>) => {
+      const p = toWorld(e.target.x(), e.target.y());
+      if (end === "start") {
+        updateEl(el.id, { x: p.x, y: p.y, w: el.x + el.w - p.x, h: el.y + el.h - p.y });
+      } else {
+        updateEl(el.id, { w: p.x - el.x, h: p.y - el.y });
+      }
+    };
+
   const handleMouseDown = (e: KonvaEventObject<MouseEvent>) => {
     if (readOnly || present) return;
     const btn = e.evt.button;
@@ -779,6 +806,8 @@ export function Board({
 
     // Transformer handles own their events — never start an interaction on them.
     if (isOverTransformer(e.target)) return;
+    // Line/arrow endpoint handles are Konva-draggable UI — they own their drags.
+    if (e.target.name() === "endpoint-handle") return;
 
     const world = toWorld(pointer.x, pointer.y);
     downScreenRef.current = { x: pointer.x, y: pointer.y };
@@ -812,10 +841,11 @@ export function Board({
           .map((sid) => board.elements.find((e2) => e2.id === sid))
           .filter((e2): e2 is BoardElement => e2 !== undefined);
         const pad = 4 / camera.scale;
-        const minX = Math.min(...sel.map((s) => s.x)) - pad;
-        const minY = Math.min(...sel.map((s) => s.y)) - pad;
-        const maxX = Math.max(...sel.map((s) => s.x + s.w)) + pad;
-        const maxY = Math.max(...sel.map((s) => s.y + s.h)) + pad;
+        const boxes = sel.map((s) => bboxOf(s));
+        const minX = Math.min(...boxes.map((b) => b.x)) - pad;
+        const minY = Math.min(...boxes.map((b) => b.y)) - pad;
+        const maxX = Math.max(...boxes.map((b) => b.x + b.w)) + pad;
+        const maxY = Math.max(...boxes.map((b) => b.y + b.h)) + pad;
         if (sel.length > 0 && world.x >= minX && world.x <= maxX && world.y >= minY && world.y <= maxY) {
           interactionRef.current = {
             kind: "pointShape",
@@ -1465,6 +1495,35 @@ export function Board({
                 newBox.width < 8 || newBox.height < 8 ? oldBox : newBox
               }
             />
+            {/* Canva-style line/arrow selection: the stroke gets a dashed
+                highlight (in ElementView) plus two draggable endpoint handles —
+                no rectangular overlay. Dragging a handle reshapes the line.
+                This layer is untransformed → screen coords: map world → screen
+                and keep handle size constant on screen. */}
+            {selectedLineEl && (
+              <>
+                {(["start", "end"] as const).map((end) => {
+                  const wx = end === "start" ? selectedLineEl.x : selectedLineEl.x + selectedLineEl.w;
+                  const wy = end === "start" ? selectedLineEl.y : selectedLineEl.y + selectedLineEl.h;
+                  const s = toScreen(wx, wy);
+                  return (
+                    <Circle
+                      key={end}
+                      name="endpoint-handle"
+                      x={s.x}
+                      y={s.y}
+                      radius={6.5}
+                      fill="#ffffff"
+                      stroke="#6c8cff"
+                      strokeWidth={2}
+                      draggable
+                      onDragMove={dragLineEndpoint(selectedLineEl, end)}
+                      onDragEnd={dragLineEndpoint(selectedLineEl, end)}
+                    />
+                  );
+                })}
+              </>
+            )}
           </Layer>
           <Layer listening={false}>
             {board.peers.map((peer) => {

@@ -1,5 +1,6 @@
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
+import type Konva from "konva";
 import { Arrow, Ellipse, Group, Line, Path, Rect, Text } from "react-konva";
 import type { BoardElement, ElementPatch, InkShape } from "@comata/elements";
 
@@ -65,6 +66,20 @@ export const ElementView = memo(function ElementView({
   onEdit,
 }: ElementViewProps) {
   const hitTarget = interactive && (el.kind !== "ink" || selected);
+  const groupRef = useRef<Konva.Group | null>(null);
+
+  // The Transformer's selection box must equal the HITBOX — the original edge
+  // box — never the "full size" (outer/middle border overhang would otherwise
+  // inflate it). Overriding getClientRect pins it to exactly w×h; normalized
+  // for lines/arrows whose w/h are signed offsets.
+  useEffect(() => {
+    const g = groupRef.current;
+    if (!g) return;
+    const x0 = Math.min(0, el.w);
+    const y0 = Math.min(0, el.h);
+    g.getClientRect = () => ({ x: x0, y: y0, width: Math.abs(el.w), height: Math.abs(el.h) });
+  });
+
   const commitTransform = (e: KonvaEventObject<Event>) => {
     if (!hitTarget) return;
     const node = e.target;
@@ -83,6 +98,7 @@ export const ElementView = memo(function ElementView({
 
   return (
     <Group
+      ref={groupRef}
       id={el.id}
       name="element"
       x={el.x}
@@ -174,27 +190,52 @@ function ElementChildren({ el, editing, selected }: { el: BoardElement; editing:
 
     case "line":
       return (
-        <Line
-          points={[0, 0, el.w, el.h]}
-          stroke={el.stroke}
-          strokeWidth={el.strokeWidth}
-          lineCap="round"
-          hitStrokeWidth={12}
-        />
+        <>
+          {selected && (
+            // Selection highlight hugging the stroke (screen-space dash).
+            <Line
+              points={[0, 0, el.w, el.h]}
+              stroke="#6c8cff"
+              strokeWidth={1.5}
+              dash={[4, 3]}
+              strokeScaleEnabled={false}
+              listening={false}
+            />
+          )}
+          <Line
+            points={[0, 0, el.w, el.h]}
+            stroke={el.stroke}
+            strokeWidth={el.strokeWidth}
+            lineCap="round"
+            hitStrokeWidth={12}
+          />
+        </>
       );
 
     case "arrow":
       return (
-        <Arrow
-          points={[0, 0, el.w, el.h]}
-          stroke={el.stroke}
-          fill={el.stroke}
-          strokeWidth={el.strokeWidth}
-          lineCap="round"
-          pointerLength={11}
-          pointerWidth={9}
-          hitStrokeWidth={12}
-        />
+        <>
+          {selected && (
+            <Line
+              points={[0, 0, el.w, el.h]}
+              stroke="#6c8cff"
+              strokeWidth={1.5}
+              dash={[4, 3]}
+              strokeScaleEnabled={false}
+              listening={false}
+            />
+          )}
+          <Arrow
+            points={[0, 0, el.w, el.h]}
+            stroke={el.stroke}
+            fill={el.stroke}
+            strokeWidth={el.strokeWidth}
+            lineCap="round"
+            pointerLength={11}
+            pointerWidth={9}
+            hitStrokeWidth={12}
+          />
+        </>
       );
 
     case "sticky":
