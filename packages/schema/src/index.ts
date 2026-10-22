@@ -25,3 +25,43 @@ export const HealthResponse = z.object({
   time: z.string(),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
+
+// ── Liveblocks room auth (Slice 1) ──────────────────────────────────────────
+
+export const LiveblocksAuthRequest = z.object({
+  room: z.string().min(1).max(120),
+  userId: z.string().min(1).max(64).optional(),
+});
+export type LiveblocksAuthRequest = z.infer<typeof LiveblocksAuthRequest>;
+
+export const LiveblocksAuthResponse = z.object({
+  token: z.string(),
+});
+export type LiveblocksAuthResponse = z.infer<typeof LiveblocksAuthResponse>;
+
+// ── Notebook API contracts (Slice 2) ────────────────────────────────────────
+
+export const NotebookCreateRequest = z.object({
+  title: z.string().min(1).max(120),
+  kind: NotebookKind.default("canvas"),
+});
+export type NotebookCreateRequest = z.infer<typeof NotebookCreateRequest>;
+
+export const NotebookRenameRequest = z.object({
+  title: z.string().min(1).max(120),
+});
+export type NotebookRenameRequest = z.infer<typeof NotebookRenameRequest>;
+
+export const NotebookSummary = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  kind: NotebookKind,
+  role: MemberRole,
+  updatedAt: z.string(),
+});
+export type NotebookSummary = z.infer<typeof NotebookSummary>;
+
+export const NotebookListResponse = z.object({
+  notebooks: z.array(NotebookSummary),
+});
+export type NotebookListResponse = z.infer<typeof NotebookListResponse>;

@@ -22,5 +22,14 @@ coverage/
 # OS
 .DS_Store
 
+# Generated Prisma client
+packages/db/src/generated/
+
+# pnpm-managed agent skills cache
+.agents/
+
 # Archived production-architecture docs (future implementation — out of MVP scope)
 docs-future-implementation/
+
+# Local docs not for the repo
+IDEA.pdf

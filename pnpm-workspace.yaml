@@ -4,6 +4,25 @@ packages:
 
 allowBuilds:
   esbuild: true
+  prisma: true
+  "@prisma/engines": true
+  "@prisma/client": true
 
 minimumReleaseAgeExclude:
   - vite@8.3.5
+  - "@liveblocks/client@3.24.4"
+  - "@liveblocks/core@3.24.4"
+  - "@liveblocks/node@3.24.4"
+  - "@liveblocks/yjs@3.24.4"
+  - "@better-auth/core@1.7.12"
+  - "@better-auth/drizzle-adapter@1.7.12"
+  - "@better-auth/kysely-adapter@1.7.12"
+  - "@better-auth/memory-adapter@1.7.12"
+  - "@better-auth/mongo-adapter@1.7.12"
+  - "@better-auth/prisma-adapter@1.7.12"
+  - "@better-auth/telemetry@1.7.12"
+  - better-auth@1.7.12
+
+permissions:
+  dotenv:
+    skills: true

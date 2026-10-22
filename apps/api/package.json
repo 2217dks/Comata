@@ -3,11 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch --env-file=../../.env src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@comata/db": "workspace:*",
     "@comata/schema": "workspace:*",
+    "@liveblocks/node": "^3.24.4",
+    "better-auth": "^1.7.12",
     "hono": "^4.13.13"
   },
   "devDependencies": {

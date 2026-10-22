@@ -1,0 +1,152 @@
+// Prisma 7 (stable): ESM-first `prisma-client` generator (output path required),
+// Rust-free client — driver adapters are the standard runtime setup.
+//
+// Deviations from docs/data-model.md (deliberate):
+//   * User.id / ownerId / member userId are plain strings — Better-Auth issues
+//     its own ids (not UUIDs).
+//   * CodeRun.elementId is a plain string — element ids come from the CRDT
+//     ("el-…" via uid()), so a UUID FK would be wrong.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: connection URLs live in prisma.config.ts (CLI) and the pg
+  // adapter (runtime client) — never in the schema.
+}
+
+// ── Auth (Better-Auth Prisma adapter owns these — do not hand-edit fields) ──
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  notebooks     Notebook[]       @relation("NotebookOwner")
+  members       NotebookMember[]
+}
+
+model Account {
+  id                    String    @id
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+// ── Domain ──────────────────────────────────────────────────────────────────
+
+/// The project container. All app work happens inside a notebook.
+/// Elements (text, ink, shapes, code, math, visualizers, images, frames)
+/// live ONLY in the Yjs doc — snapshotted into `yjsSnapshot` per R1.
+model Notebook {
+  id            String           @id @default(uuid()) @db.Uuid
+  title         String
+  kind          NotebookKind     @default(canvas)
+  ownerId       String
+  owner         User             @relation("NotebookOwner", fields: [ownerId], references: [id])
+  yjsSnapshot   Bytes?
+  thumbnailUrl  String?
+  schemaVersion Int              @default(1)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  members       NotebookMember[]
+  runs          CodeRun[]
+
+  @@index([ownerId, updatedAt])
+}
+
+enum NotebookKind {
+  canvas
+  presentation
+}
+
+model NotebookMember {
+  notebookId String     @db.Uuid
+  userId     String
+  role       MemberRole
+  notebook   Notebook   @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([notebookId, userId])
+  @@index([userId])
+}
+
+enum MemberRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+/// Execution history for code elements. `elementId` refers to an element inside
+/// the notebook's Yjs doc — deleting the element keeps run history until the
+/// notebook is deleted (cascade).
+model CodeRun {
+  id         String    @id @default(uuid()) @db.Uuid
+  notebookId String    @db.Uuid
+  elementId  String
+  lang       String
+  stdin      String?
+  stdout     String?
+  stderr     String?
+  exitCode   Int?
+  timeMs     Int?
+  status     RunStatus @default(QUEUED)
+  createdAt  DateTime  @default(now())
+  notebook   Notebook  @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+
+  @@index([notebookId, elementId, createdAt])
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  DONE
+  ERROR
+  TIMEOUT
+}

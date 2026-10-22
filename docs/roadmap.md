@@ -9,17 +9,17 @@
 - [ ] Web deploys to Vercel/Netlify; API hello-world route works
 - [ ] CI: typecheck + build on PR
 - **Demo:** deployed site shows a blank board.## Slice 1 — Board + live collab (3–4 days)
-- [ ] `packages/elements`: element shell (id, kind, x/y/w/h/rotation/z) + Zod payloads
-- [ ] `packages/crdt`: Yjs doc shape + `@liveblocks/yjs` provider + projection helper
-- [ ] react-konva board: pan/zoom, create + drag a rectangle & sticky note, multiplayer cursors
-- [ ] Liveblocks auth endpoint in API (anon-allowed for now)
-- **Demo:** two browsers, shared board, both cursors move, both drag elements. *(Success criterion #1 half-met.)*
+- [x] `packages/elements`: element shell (id, kind, x/y/w/h/rotation/z) + Zod payloads
+- [x] `packages/crdt`: Yjs doc shape + `@liveblocks/yjs` provider + projection helper
+- [x] react-konva board: pan/zoom, create + drag a rectangle & sticky note, multiplayer cursors
+- [x] Liveblocks auth endpoint in API (anon-allowed for now)
+- [ ] **Demo:** two browsers, shared board, both cursors move, both drag elements. *(Success criterion #1 half-met.)*
 
 ## Slice 2 — Auth + notebooks (2–3 days)
-- [ ] Supabase project + Prisma 7 schema (data-model.md, ER-first) + first migration
-- [ ] Better-Auth: email+password + Google OAuth
-- [ ] Dashboard: notebook list / create (kind picker) / rename / delete; `NotebookMember` rows
-- [ ] Liveblocks room tokens now require membership (`notebook:{id}`); Yjs snapshot → `Notebook.yjsSnapshot` on unload/timer
+- [x] Supabase project + Prisma 7 schema (data-model.md, ER-first) + first migration *(migrations go via the IPv4 session pooler — direct :5432 is IPv6-only on the free plan)*
+- [x] Better-Auth: email+password (Google OAuth wired — activates when `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are added to `.env`)
+- [x] Dashboard: notebook list / create (kind picker) / rename / delete; `NotebookMember` rows; open-by-link enrolls as EDITOR
+- [x] Liveblocks room tokens now require membership (`notebook:{id}`); Yjs snapshot → `Notebook.yjsSnapshot` on unload/timer
 - **Demo:** sign in, create notebook, invite link opens the same notebook for a second user as editor.
 
 ## Slice 3 — Element system breadth (4–5 days)

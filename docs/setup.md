@@ -44,10 +44,14 @@ JUDGE0_AUTH=""                                     # set if you enable Judge0 au
 
 ```bash
 pnpm install
-cp .env.example .env                 # fill in Supabase + Liveblocks keys
-pnpm --filter api prisma:migrate     # first migration (needs DIRECT_URL)
+cp .env.example .env                 # fill in keys (see §1) — .env lives at the REPO ROOT
+pnpm --filter api prisma:migrate     # first migration (needs DIRECT_URL) — Slice 2
 pnpm dev                             # runs web (5173) + api (8788) concurrently
 ```
+
+> **Env loading is automatic from the repo root:** the API runs with Node's
+> `--env-file=../../.env` and Vite reads the same file (`envDir: "../../"`).
+> Only `VITE_`-prefixed vars reach the browser bundle — server keys never do.
 
 - Web: `http://localhost:5173` — sign up, create a canvas, draw.
 - Collab works locally immediately (Liveblocks is cloud-hosted — no local sync server).

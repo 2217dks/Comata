@@ -9,9 +9,18 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@comata/crdt": "workspace:*",
+    "@comata/elements": "workspace:*",
     "@comata/schema": "workspace:*",
+    "@liveblocks/client": "^3.24.4",
+    "@liveblocks/yjs": "^3.24.4",
+    "better-auth": "^1.7.12",
+    "konva": "^10.9.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "react-konva": "^19.3.2",
+    "react-router-dom": "^7.18.4",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
