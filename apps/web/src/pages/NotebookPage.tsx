@@ -45,6 +45,21 @@ export function NotebookPage() {
     }
   }, [isPending, session]);
 
+  // Stable per session — useBoard tears down the room if this changes.
+  // Must live above the early returns: hooks can never be conditional.
+  const identity = useMemo<Identity | null>(
+    () =>
+      session
+        ? {
+            id: session.user.id,
+            name: session.user.name || session.user.email,
+            color: pickCursorColor(session.user.id),
+          }
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session?.user.id, session?.user.name, session?.user.email],
+  );
+
   if (isPending) {
     return <Spinner label="Checking your session…" />;
   }
@@ -77,18 +92,7 @@ export function NotebookPage() {
     );
   }
 
-  const identity = useMemo<Identity>(
-    () => ({
-      id: session.user.id,
-      name: session.user.name || session.user.email,
-      color: pickCursorColor(session.user.id),
-    }),
-    // Stable per session — useBoard tears down the room if this changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.user.id, session.user.name, session.user.email],
-  );
-
-  if (!notebook || !id) {
+  if (!notebook || !id || !identity) {
     return <Spinner label="Opening notebook…" />;
   }
 

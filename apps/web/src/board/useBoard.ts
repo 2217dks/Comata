@@ -159,7 +159,7 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     };
 
     const elementsMap = getElements(ydoc);
-    const onDeep = (events: Y.YEvent<unknown>[]) => {
+    const onDeep = (events: Y.YEvent<any>[]) => {
       for (const ev of events) {
         if (ev.path.length === 0) {
           // The elements map itself changed: add/delete of whole elements.
