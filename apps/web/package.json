@@ -15,6 +15,7 @@
     "@liveblocks/client": "^3.24.4",
     "@liveblocks/yjs": "^3.24.4",
     "better-auth": "^1.7.12",
+    "katex": "^0.16.11",
     "konva": "^10.9.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

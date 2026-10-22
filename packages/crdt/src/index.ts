@@ -1,10 +1,18 @@
 import * as Y from "yjs";
 import {
   BoardElementSchema,
+  cloneElement,
+  createCustomElement,
+  createEllipseElement,
+  createFrameElement,
+  createInkElement,
+  createLineElement,
   createRectElement,
   createStickyElement,
+  createTextElement,
   uid,
   type BoardElement,
+  type ElementPatch,
 } from "@comata/elements";
 
 // Yjs doc shape:
@@ -30,29 +38,145 @@ function insert(ydoc: Y.Doc, el: BoardElement): void {
   getElements(ydoc).set(el.id, new Y.Map(Object.entries(el)));
 }
 
-export function addRect(ydoc: Y.Doc, x: number, y: number): BoardElement {
-  const el = createRectElement(uid(), x, y, nextZ(ydoc));
+/** Create any placement-kind element at a point (click-to-place tools). */
+export function addElement(
+  ydoc: Y.Doc,
+  kind: "rect" | "ellipse" | "sticky" | "text" | "frame",
+  x: number,
+  y: number,
+  opts?: { frameName?: string; w?: number; h?: number },
+): BoardElement {
+  const z = nextZ(ydoc);
+  const id = uid();
+  let el: BoardElement;
+  switch (kind) {
+    case "rect":
+      el = createRectElement(id, x, y, z);
+      break;
+    case "ellipse":
+      el = createEllipseElement(id, x, y, z);
+      break;
+    case "sticky":
+      el = createStickyElement(id, x, y, z);
+      break;
+    case "text":
+      el = createTextElement(id, x, y, z);
+      break;
+    case "frame": {
+      const count = countKind(ydoc, "frame");
+      el = createFrameElement(id, x, y, z, opts?.frameName ?? `Frame ${count + 1}`);
+      break;
+    }
+  }
+  if (opts?.w !== undefined || opts?.h !== undefined) {
+    el = { ...el, w: opts.w ?? el.w, h: opts.h ?? el.h };
+  }
   insert(ydoc, el);
   return el;
 }
 
-export function addSticky(ydoc: Y.Doc, x: number, y: number): BoardElement {
-  const el = createStickyElement(uid(), x, y, nextZ(ydoc));
+/** Commit a dragged line/arrow (x1,y1 → x2,y2). */
+export function addLineElement(
+  ydoc: Y.Doc,
+  kind: "line" | "arrow",
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): BoardElement {
+  const el = createLineElement(kind, uid(), x1, y1, x2, y2, nextZ(ydoc));
   insert(ydoc, el);
   return el;
 }
 
-export function moveElement(ydoc: Y.Doc, id: string, x: number, y: number): void {
+/** Commit an ink stroke from flat world-space points. */
+export function addInkElement(
+  ydoc: Y.Doc,
+  mode: "pen" | "highlighter",
+  worldPoints: number[],
+): BoardElement {
+  const el = createInkElement(uid(), mode, worldPoints, nextZ(ydoc));
+  insert(ydoc, el);
+  return el;
+}
+
+/** Insert an AI-generated custom element (Slice 5b generation flow). */
+export function addCustomElement(
+  ydoc: Y.Doc,
+  x: number,
+  y: number,
+  init?: { title?: string; prompt?: string; spec?: string },
+): BoardElement {
+  const el = createCustomElement(uid(), x, y, nextZ(ydoc), init);
+  insert(ydoc, el);
+  return el;
+}
+
+function countKind(ydoc: Y.Doc, kind: BoardElement["kind"]): number {
+  let n = 0;
+  getElements(ydoc).forEach((raw) => {
+    if (raw.get("kind") === kind) n++;
+  });
+  return n;
+}
+
+/** Patch any mutable fields on an element (move/resize/rotate/restyle/text). */
+export function updateElement(ydoc: Y.Doc, id: string, patch: ElementPatch): void {
   const yel = getElements(ydoc).get(id);
   if (!yel) return;
-  yel.set("x", x);
-  yel.set("y", y);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) yel.set(key, value);
+  }
+}
+
+export function duplicateElement(ydoc: Y.Doc, id: string): BoardElement | null {
+  const raw = getElements(ydoc).get(id);
+  if (!raw) return null;
+  const parsed = BoardElementSchema.safeParse(Object.fromEntries(raw.entries()));
+  if (!parsed.success) return null;
+  const copy = cloneElement(parsed.data, uid(), nextZ(ydoc));
+  insert(ydoc, copy);
+  return copy;
 }
 
 export function bringToFront(ydoc: Y.Doc, id: string): void {
   const yel = getElements(ydoc).get(id);
   if (!yel) return;
   yel.set("z", nextZ(ydoc));
+}
+
+export function sendToBack(ydoc: Y.Doc, id: string): void {
+  const yel = getElements(ydoc).get(id);
+  if (!yel) return;
+  let min = Infinity;
+  getElements(ydoc).forEach((other) => {
+    if (other.get("id") !== id) min = Math.min(min, (other.get("z") as number) ?? 0);
+  });
+  yel.set("z", Number.isFinite(min) ? min - 1 : 0);
+}
+
+/** Move exactly one slot up/down the z stack (Figma's ] / [ behaviour). */
+export function moveZForward(ydoc: Y.Doc, id: string): void {
+  shiftZ(ydoc, id, +1);
+}
+
+export function moveZBackward(ydoc: Y.Doc, id: string): void {
+  shiftZ(ydoc, id, -1);
+}
+
+function shiftZ(ydoc: Y.Doc, id: string, delta: number): void {
+  const sorted = projectBoard(ydoc); // z ascending
+  const idx = sorted.findIndex((e) => e.id === id);
+  if (idx < 0) return;
+  const target = sorted[idx + delta];
+  if (!target) return;
+  const ymap = getElements(ydoc);
+  const a = ymap.get(id);
+  const b = ymap.get(target.id);
+  if (!a || !b) return;
+  const za = a.get("z") as number;
+  a.set("z", b.get("z") as number);
+  b.set("z", za);
 }
 
 export function deleteElement(ydoc: Y.Doc, id: string): void {

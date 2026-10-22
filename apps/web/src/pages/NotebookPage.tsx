@@ -123,5 +123,5 @@ function BoardSession({ notebook, identity }: { notebook: NotebookDetail; identi
     };
   }, [saveSnapshot]);
 
-  return <Board board={board} identity={identity} title={notebook.title} readOnly={readOnly} />;
+  return <Board board={board} identity={identity} title={notebook.title} kind={notebook.kind} readOnly={readOnly} />;
 }

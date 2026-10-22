@@ -904,3 +904,488 @@ body {
   gap: 8px;
   margin-top: 6px;
 }
+
+/* Tool dock sub-popups (tldraw flyouts): variant pickers per tool. */
+
+.tool-anchor {
+  position: relative;
+}
+
+.flyout-dot {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #8b93a7;
+}
+
+.tool-btn.active .flyout-dot {
+  background: #cfd6e4;
+}
+
+.tool-flyout {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 5px;
+  background: #262b36;
+  border: 1px solid #343b49;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.tool-flyout button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #cfd6e4;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tool-flyout button:hover {
+  background: #333a48;
+}
+
+.tool-flyout button.active {
+  color: #ffffff;
+  background: rgba(108, 140, 255, 0.16);
+}
+
+/* ── Slice 3: tools, selection, present/follow, text/math overlays ── */
+
+.board-canvas.tool-pen,
+.board-canvas.tool-highlighter,
+.board-canvas.tool-ellipse,
+.board-canvas.tool-line,
+.board-canvas.tool-arrow,
+.board-canvas.tool-text {
+  cursor: crosshair;
+}
+
+/* ── Tool dock (left edge, vertical) ────────────────────── */
+
+.tool-dock {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #1e2128;
+  border: 1px solid #2e3340;
+  border-radius: 12px;
+  padding: 6px;
+  z-index: 15;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
+.presenting .tool-dock {
+  display: none;
+}
+
+/* ── Topbar properties bar ──────────────────────────────── */
+
+.topbar-center {
+  justify-content: center;
+  min-width: 0;
+}
+
+.props-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0 8px;
+}
+
+.props-kind {
+  color: #aeb4c4;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.props-hint {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.prop-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.prop-label {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.prop-value {
+  color: #aeb4c4;
+  font-size: 11.5px;
+  min-width: 34px;
+}
+
+.prop-action {
+  border: 1px solid #2e3340;
+  background: transparent;
+  color: #aeb4c4;
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.prop-action:hover {
+  color: var(--text);
+  border-color: #3d4354;
+}
+
+.props-bar input[type="color"] {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #2e3340;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.props-bar input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.props-bar input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+.range {
+  width: 90px;
+  accent-color: #6c8cff;
+  cursor: pointer;
+}
+
+.toggle {
+  border: 1px solid #2e3340;
+  background: transparent;
+  color: #aeb4c4;
+  border-radius: 6px;
+  min-width: 24px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.toggle.active {
+  background: #6c8cff;
+  border-color: #6c8cff;
+  color: #fff;
+}
+
+.swatch-mini {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.swatch-mini.active {
+  border-color: #ffffff;
+}
+
+/* ── Right-click context menu ───────────────────────────── */
+
+.ctx-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #1e2128;
+  border: 1px solid #2e3340;
+  border-radius: 10px;
+  padding: 5px;
+  z-index: 60;
+  min-width: 190px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+
+.ctx-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 0;
+  background: transparent;
+  color: #c6cbd8;
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ctx-menu button:hover {
+  background: #2b303c;
+  color: var(--text);
+}
+
+.ctx-menu button.danger {
+  color: #ff9c9c;
+}
+
+.ctx-menu button.danger:hover {
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.ctx-key {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* ── (i) help popover ───────────────────────────────────── */
+
+.info-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid #2e3340;
+  background: transparent;
+  color: #aeb4c4;
+  font-size: 12.5px;
+  font-style: italic;
+  font-family: Georgia, serif;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.info-btn:hover,
+.info-btn.active {
+  color: var(--text);
+  border-color: #3d4354;
+}
+
+.info-popover {
+  position: absolute;
+  top: 54px;
+  right: 12px;
+  width: 330px;
+  background: #1e2128;
+  border: 1px solid #2e3340;
+  border-radius: 12px;
+  padding: 16px 18px;
+  z-index: 50;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+.info-popover h4 {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #8b93a7;
+}
+
+.info-popover p {
+  margin: 0;
+  color: #c6cbd8;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.info-conn {
+  margin-bottom: 2px;
+}
+
+.avatar-btn {
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.avatar-btn:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.avatar-btn.following {
+  border-color: #ffffff;
+}
+
+.present-btn {
+  border: 1px solid #3ecf8e55;
+  background: rgba(62, 207, 142, 0.12);
+  color: #3ecf8e;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.present-btn:hover:not(:disabled) {
+  background: rgba(62, 207, 142, 0.22);
+}
+
+.present-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.presenting .topbar,
+.presenting .board-hint {
+  display: none;
+}
+
+.present-controls {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(19, 22, 30, 0.92);
+  border: 1px solid #2e3340;
+  border-radius: 12px;
+  padding: 8px 12px;
+  z-index: 20;
+}
+
+.present-controls button {
+  border: 0;
+  background: #2b303c;
+  color: var(--text);
+  border-radius: 7px;
+  width: 32px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.present-controls button:hover:not(:disabled) {
+  background: #3a4050;
+}
+
+.present-controls button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.present-count {
+  color: #aeb4c4;
+  font-size: 12.5px;
+  min-width: 46px;
+  text-align: center;
+}
+
+.present-exit {
+  width: auto !important;
+  padding: 0 12px !important;
+  color: #ff9c9c !important;
+}
+
+.follow-pill {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(19, 22, 30, 0.92);
+  border: 1px solid #2e3340;
+  border-radius: 999px;
+  padding: 7px 14px;
+  color: #aeb4c4;
+  font-size: 12.5px;
+  z-index: 20;
+}
+
+.follow-pill .pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.follow-pill button {
+  border: 0;
+  background: #6c8cff;
+  color: #fff;
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.follow-pill button:hover {
+  background: #7d9aff;
+}
+
+.text-editor {
+  position: absolute;
+  z-index: 14;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 0;
+  line-height: 1.3;
+  font-family: inherit;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.text-editor::placeholder {
+  color: rgba(148, 163, 184, 0.5);
+}
+
+.math-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.math-text {
+  position: absolute;
+  white-space: pre-wrap;
+  line-height: 1.3;
+  transform-origin: top left;
+}
+
+.math-text .katex {
+  font-size: 1.1em;
+}
