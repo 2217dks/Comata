@@ -22,7 +22,3 @@ minimumReleaseAgeExclude:
   - "@better-auth/prisma-adapter@1.7.12"
   - "@better-auth/telemetry@1.7.12"
   - better-auth@1.7.12
-
-permissions:
-  dotenv:
-    skills: true
