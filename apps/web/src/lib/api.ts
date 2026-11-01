@@ -1,4 +1,7 @@
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8788";
+// On LAN devices the page is served from the host machine's IP, so default the
+// API origin to that same hostname (VITE_API_URL still wins when set, e.g. prod).
+export const API_URL =
+  import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:8788`;
 
 /** JSON fetch against the API with session cookies. Throws on non-2xx. */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {

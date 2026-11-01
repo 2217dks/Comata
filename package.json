@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel --no-sort run dev",
+    "dev": "pnpm -r --parallel --no-sort run dev --host",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   },

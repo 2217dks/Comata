@@ -136,9 +136,9 @@ adjacent element in the stack.
 ## Removed: frames
 
 Frames were cut from the dock/shortcuts (user decision — they were filler).
-The kind + renderer remain in the schema/registry for legacy documents, but no
-tool creates them. Present mode (presentation notebooks) is therefore disabled
-until Slice 7 replaces frame-flipping with a real slide system.
+Slice 7 removed the kind entirely (see "Slice 7 rework" below); legacy docs
+containing frames fail schema validation and their elements are dropped on
+projection (accepted — no migration, owner opted to discard old data).
 
 ## Mode gates
 
@@ -147,3 +147,45 @@ until Slice 7 replaces frame-flipping with a real slide system.
 - **Read-only (VIEWER)**: no tools, no editing, no present.
 - **Follow mode**: click a peer's avatar (or the presenter pill); any manual
   pan/zoom breaks it.
+
+## Slice 7 rework: pages (ADR-0005)
+
+Frames are REMOVED entirely (kind deleted from the union, factory, registry;
+renderer case cut). Slice 3's broadcast-present/follow mode is gone with
+them — presentation is per-user local.
+
+**Pages** (presentation notebooks only):
+- 1920×1080 world units, 16:9. Every element carries `pageId`; the page list
+  is a Y.Array of `{id, background}` records. Numbered only — a title is just
+  a text element on the page.
+- Edit mode: one page fit-to-viewport; zoom/pan allowed inside it. Page
+  sidebar (editor chrome): thumbnails, add, duplicate, delete (last page
+  protected; page + its elements go in ONE transaction = one undo step),
+  drag-reorder, per-page background color.
+- Cross-page move: right-click "Move to page ▸ N" — identity-preserving
+  (the same element row flips pageId). Copy/paste remains a copy (fresh ids).
+- Element default colors derive from the surface's background luminance
+  (light → dark ink/text; dark → light). Surface = current page in decks,
+  notebook background (light/dark, creation-fixed) in canvas notebooks.
+
+**Present mode** (decks only, per-user local — nothing is broadcast):
+- Fullscreen fit of the current page; no zoom/pan; ←/→ + counter; Esc exits.
+- Geometry locked (no select/move/resize/create/context menu).
+- Pen/highlighter ARE live — the lone editing exception; strokes commit as
+  shared elements, visible to everyone in real time.
+- Interactive elements are single-click live for EVERYONE (no double-click):
+  math graph pans, code runs (viewers still gated by `allowViewerRuns`), AI
+  widget iframes engage. Equations stay non-editable for viewers.
+
+**Viewers** get the same page UI read-only: pdf-style sidebar of thumbnails
+(clickable, no management buttons), full interactivity of the per-user parts
+above.
+
+## Mode gates (updated)
+
+- **Present mode** button only in presentation-kind notebooks; present is
+  LOCAL playback (per-user), not a broadcast.
+- **Read-only (VIEWER)**: no tools, no editing, no geometry changes; present
+  navigation + interactive elements work (run gate applies).
+- **Follow mode: REMOVED** (ADR-0005) — avatars show who's on the board,
+  nothing more.

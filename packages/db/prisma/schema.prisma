@@ -4,8 +4,9 @@
 // Deviations from docs/data-model.md (deliberate):
 //   * User.id / ownerId / member userId are plain strings — Better-Auth issues
 //     its own ids (not UUIDs).
-//   * CodeRun.elementId is a plain string — element ids come from the CRDT
-//     ("el-…" via uid()), so a UUID FK would be wrong.
+//   * CodeRun was removed (ADR-0003): runs are per-user and ephemeral — results
+//     go only to the requesting client and are never persisted. Concurrency is
+//     guarded by an in-memory per-user run lock + rate limit in apps/api.
 
 generator client {
   provider = "prisma-client"
@@ -32,6 +33,7 @@ model User {
   sessions      Session[]
   notebooks     Notebook[]       @relation("NotebookOwner")
   members       NotebookMember[]
+  generations   GeneratedElement[]
 }
 
 model Account {
@@ -85,18 +87,22 @@ model Verification {
 /// Elements (text, ink, shapes, code, math, visualizers, images, frames)
 /// live ONLY in the Yjs doc — snapshotted into `yjsSnapshot` per R1.
 model Notebook {
-  id            String           @id @default(uuid()) @db.Uuid
-  title         String
-  kind          NotebookKind     @default(canvas)
-  ownerId       String
-  owner         User             @relation("NotebookOwner", fields: [ownerId], references: [id])
-  yjsSnapshot   Bytes?
-  thumbnailUrl  String?
-  schemaVersion Int              @default(1)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  members       NotebookMember[]
-  runs          CodeRun[]
+  id              String             @id @default(uuid()) @db.Uuid
+  title           String
+  kind            NotebookKind       @default(canvas)
+  /// Canvas notebooks: surface tone, fixed at creation (Slice 7). Presentation
+  /// notebooks don't use it — pages carry per-page colors in the doc.
+  background      NotebookBackground @default(dark)
+  ownerId         String
+  owner           User               @relation("NotebookOwner", fields: [ownerId], references: [id])
+  yjsSnapshot     Bytes?
+  thumbnailUrl    String?
+  schemaVersion   Int                @default(1)
+  /// Owner-controlled (ADR-0003): whether VIEWERs may run code. Default off.
+  allowViewerRuns Boolean            @default(false)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  members         NotebookMember[]
 
   @@index([ownerId, updatedAt])
 }
@@ -104,6 +110,11 @@ model Notebook {
 enum NotebookKind {
   canvas
   presentation
+}
+
+enum NotebookBackground {
+  light
+  dark
 }
 
 model NotebookMember {
@@ -123,30 +134,33 @@ enum MemberRole {
   VIEWER
 }
 
-/// Execution history for code elements. `elementId` refers to an element inside
-/// the notebook's Yjs doc — deleting the element keeps run history until the
-/// notebook is deleted (cascade).
-model CodeRun {
-  id         String    @id @default(uuid()) @db.Uuid
-  notebookId String    @db.Uuid
-  elementId  String
-  lang       String
-  stdin      String?
-  stdout     String?
-  stderr     String?
-  exitCode   Int?
-  timeMs     Int?
-  status     RunStatus @default(QUEUED)
-  createdAt  DateTime  @default(now())
-  notebook   Notebook  @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+// ── AI generation (Slice 5b, ADR-0004) ──────────────────────────────────────
 
-  @@index([notebookId, elementId, createdAt])
+/// Deny-by-default gate for POST /v1/generate: only listed emails may
+/// generate. The owner manages this live (admin page) during demos.
+model AiAllowlist {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  /// Who granted access (owner's User.id); "" for seeded rows.
+  grantedBy String   @default("")
+  createdAt DateTime @default(now())
 }
 
-enum RunStatus {
-  QUEUED
-  RUNNING
-  DONE
-  ERROR
-  TIMEOUT
+/// Account-level library of every generation a user performed (immutable
+/// rows — regenerate/edit-prompt append, never update). Board elements keep
+/// `libraryId` to point back; deleting a board element never touches this.
+model GeneratedElement {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  prompt      String
+  description String   @default("")
+  /// Single self-contained HTML file (inline CSS+JS, no network) — size-capped
+  /// at insert (~200KB) and served back as iframe srcdoc.
+  html        String
+  specVersion Int      @default(1)
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
 }

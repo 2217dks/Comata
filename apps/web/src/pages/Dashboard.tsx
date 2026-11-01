@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { NotebookKind, NotebookSummary } from "@comata/schema";
 import { Spinner } from "../components/Spinner";
 import { api } from "../lib/api";
@@ -25,6 +25,8 @@ export function Dashboard() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newKind, setNewKind] = useState<NotebookKind>("canvas");
+  /** Canvas surface tone — fixed at creation (Slice 7, ADR-0006). */
+  const [newBackground, setNewBackground] = useState<"light" | "dark">("dark");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
 
@@ -150,7 +152,11 @@ export function Dashboard() {
       const nb = await api<NotebookSummary>("/v1/notebooks", {
         method: "POST",
         headers: JSON_HEADERS,
-        body: JSON.stringify({ title: newTitle.trim() || "Untitled notebook", kind: newKind }),
+        body: JSON.stringify({
+          title: newTitle.trim() || "Untitled notebook",
+          kind: newKind,
+          background: newBackground,
+        }),
       });
       setNewTitle("");
       setCreateOpen(false);
@@ -197,6 +203,9 @@ export function Dashboard() {
         </div>
         <div className="topbar-right">
           <span className="topbar-user">{user.name || user.email}</span>
+          <Link className="ghost-btn" to="/ai-admin" title="AI Create access (allowlist)">
+            AI access
+          </Link>
           <button
             className="ghost-btn"
             onClick={() => {
@@ -344,6 +353,31 @@ export function Dashboard() {
                 <small>Slide-by-slide pages, like a deck</small>
               </button>
             </div>
+            {newKind === "canvas" && (
+              <>
+                <span className="modal-label">Background</span>
+                <div className="kind-options">
+                  <button
+                    type="button"
+                    className={`kind-option kind-bg ${newBackground === "light" ? "active" : ""}`}
+                    onClick={() => setNewBackground("light")}
+                  >
+                    <span className="bg-swatch" style={{ background: "#ffffff" }} />
+                    <span>Light</span>
+                    <small>Fixed after creation</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={`kind-option kind-bg ${newBackground === "dark" ? "active" : ""}`}
+                    onClick={() => setNewBackground("dark")}
+                  >
+                    <span className="bg-swatch" style={{ background: "#171b24" }} />
+                    <span>Dark</span>
+                    <small>Fixed after creation</small>
+                  </button>
+                </div>
+              </>
+            )}
             {error && <p className="auth-error">{error}</p>}
             <div className="modal-actions">
               <button type="button" className="ghost-btn" onClick={() => setCreateOpen(false)}>

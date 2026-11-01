@@ -37,7 +37,7 @@ export type Interaction =
     }
   | {
       kind: "create";
-      tool: "line" | "arrow" | "shape" | "sticky" | "text";
+      tool: "line" | "arrow" | "shape" | "sticky" | "text" | "code" | "math" | "custom";
       startWorld: Vec;
     };
 

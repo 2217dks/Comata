@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
 import type { Room } from "@liveblocks/client";
@@ -6,17 +6,28 @@ import {
   addElement,
   addInkElement,
   addLineElement,
+  addPage,
   bringToFront,
   createUndoManager,
   deleteElement,
+  deletePage,
   duplicateElement,
+  duplicatePage,
+  ensurePages,
   getElements,
+  getPages,
+  moveElementsToPage,
+  movePage,
   moveZBackward,
   moveZForward,
   pasteElements,
+  projectPages,
   RESTORE_ORIGIN,
   sendToBack,
+  setPageBackground,
   updateElement,
+  updateElements,
+  type PageRecord,
 } from "@comata/crdt";
 import { BoardElementSchema, type BoardElement, type ElementPatch } from "@comata/elements";
 import { liveblocksClient } from "../lib/liveblocks";
@@ -45,10 +56,10 @@ export type BoardApi = {
   setCameraPresence: (camera: PeerCamera) => void;
   setPresenting: (presenting: boolean) => void;
   addEl: (
-    kind: "rect" | "ellipse" | "sticky" | "text" | "frame",
+    kind: "rect" | "ellipse" | "sticky" | "text" | "code" | "math" | "custom",
     x: number,
     y: number,
-    opts?: { w?: number; h?: number },
+    opts?: { pageId?: string; w?: number; h?: number },
   ) => BoardElement;
   addLineEl: (
     kind: "line" | "arrow",
@@ -56,11 +67,14 @@ export type BoardApi = {
     y1: number,
     x2: number,
     y2: number,
+    pageId?: string,
   ) => BoardElement | null;
-  addInkEl: (mode: "pen" | "highlighter", points: number[]) => BoardElement | null;
+  addInkEl: (mode: "pen" | "highlighter", points: number[], pageId?: string) => BoardElement | null;
   updateEl: (id: string, patch: ElementPatch) => void;
+  /** Batched multi-element patch — ONE Yjs transaction for the whole set. */
+  updateEls: (patches: { id: string; patch: ElementPatch }[]) => void;
   duplicateEl: (id: string) => string | null;
-  pasteEls: (els: BoardElement[], offset: { x: number; y: number }) => BoardElement[];
+  pasteEls: (els: BoardElement[], offset: { x: number; y: number }, pageId?: string) => BoardElement[];
   /** Canva-style per-user history: undo/redo only ever touch THIS session's
    * changes (the manager tracks the local transaction origin exclusively). */
   undo: () => void;
@@ -73,6 +87,17 @@ export type BoardApi = {
   moveElBackward: (id: string) => void;
   sendElToBack: (id: string) => void;
   deleteEl: (id: string) => void;
+  /** Ordered page list (presentation notebooks; [] for canvas docs). */
+  pages: PageRecord[];
+  /** Presentation notebooks: seed page 1 when the doc has none. Idempotent. */
+  seedPages: () => void;
+  addPage: (index?: number, background?: string) => string | null;
+  duplicatePage: (pageId: string) => string | null;
+  deletePage: (pageId: string) => boolean;
+  movePage: (from: number, to: number) => void;
+  setPageBackground: (pageId: string, background: string) => void;
+  /** Identity-preserving cross-page move (ADR-0005). */
+  moveElsToPage: (ids: string[], pageId: string) => void;
   getSnapshot: () => Uint8Array | null;
   applySnapshot: (bytes: Uint8Array) => void;
 };
@@ -95,6 +120,53 @@ type OtherUser = {
   };
 };
 
+// ── Cursor side-channel store ────────────────────────────────────────────────
+// Remote cursor positions stream at 12-25 updates/sec per peer. Routing them
+// through Board state re-rendered the ENTIRE board per mousemove per peer;
+// instead, cursors live in this tiny external store and the CursorLayer
+// component subscribes with useSyncExternalStore — only the cursor layer
+// re-renders when a peer moves.
+type CursorMap = Map<number, { name: string; color: string; x: number; y: number }>;
+export type { CursorMap };
+let cursorStore: CursorMap = new Map();
+const cursorListeners = new Set<() => void>();
+let cursorVersion = 0;
+
+function publishCursors(peers: Peer[]): void {
+  let changed = false;
+  const next: CursorMap = new Map();
+  for (const p of peers) {
+    next.set(p.connectionId, { name: p.name, color: p.color, x: p.x, y: p.y });
+    const prev = cursorStore.get(p.connectionId);
+    if (!prev || prev.x !== p.x || prev.y !== p.y || prev.name !== p.name || prev.color !== p.color) changed = true;
+  }
+  if (cursorStore.size !== next.size) changed = true;
+  if (!changed) return;
+  cursorStore = next;
+  cursorVersion++;
+  for (const l of cursorListeners) l();
+}
+
+function subscribeCursors(l: () => void): () => void {
+  cursorListeners.add(l);
+  return () => cursorListeners.delete(l);
+}
+
+/** Snapshot for useSyncExternalStore — a version tag keeps the reference
+ * stable across renders that didn't change any cursor. */
+let lastSnapshot: { v: number; cursors: CursorMap } = { v: -1, cursors: cursorStore };
+function getCursorSnapshot(): { v: number; cursors: CursorMap } {
+  if (lastSnapshot.v !== cursorVersion) lastSnapshot = { v: cursorVersion, cursors: cursorStore };
+  return lastSnapshot;
+}
+
+/** React binding for the remote-cursor side channel: a component using this
+ * re-renders ONLY when some peer's cursor moved/changed identity — Board
+ * itself never does. */
+export function useRemoteCursors(): CursorMap {
+  return useSyncExternalStore(subscribeCursors, getCursorSnapshot).cursors;
+}
+
 /**
  * Wires a notebook room's Yjs doc (owned by the Liveblocks provider) to React state.
  * - elements: projected from the Yjs doc on every update (R1: geometry lives here)
@@ -103,6 +175,7 @@ type OtherUser = {
  */
 export function useBoard(roomId: string, identity: Identity): BoardApi {
   const [elements, setElements] = useState<BoardElement[]>([]);
+  const [pages, setPages] = useState<PageRecord[]>([]);
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [peers, setPeers] = useState<Peer[]>([]);
 
@@ -128,6 +201,13 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     const provider = getYjsProviderForRoom(room);
     const ydoc = provider.getYDoc();
     ydocRef.current = ydoc;
+
+    // Page list projection: the pages Y.Array re-projects wholesale on any
+    // change (page ops are rare — creation/reorder/delete — so no dirty-id
+    // machinery is needed, unlike elements).
+    const projectPagesNow = () => setPages(projectPages(ydoc));
+    getPages(ydoc).observe(projectPagesNow);
+    projectPagesNow();
 
     // Project with identity stabilization + dirty-id tracking: only elements
     // whose Y.Map actually changed get re-parsed (the Zod parse is the
@@ -164,7 +244,7 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
       } else {
         return; // nothing changed — don't touch React state at all
       }
-      const out = [...cache.values()].sort((a, b) => a.z - b.z || a.id.localeCompare(b.id));
+      const out = [...cache.values()].sort((a, b) => a.z - b.z || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       setElements((prev) =>
         prev.length === out.length && prev.every((e, i) => e === out[i]) ? prev : out,
       );
@@ -214,7 +294,32 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
           presenting: other.presence?.presenting === true,
         });
       }
-      setPeers(list);
+      // Cursor-only updates (x/y moves) never touch Board state — the
+      // side-channel store below owns them. setPeers fires only when a peer's
+      // IDENTITY fields change (join/leave/rename/color/presenting/camera —
+      // camera feeds follow mode), i.e. a few times per session, not 25/sec.
+      setPeers((prev) => {
+        if (prev.length !== list.length) return list;
+        for (let i = 0; i < list.length; i++) {
+          const a = prev[i];
+          const b = list[i];
+          if (!a || !b) return list;
+          if (
+            a.connectionId !== b.connectionId ||
+            a.name !== b.name ||
+            a.color !== b.color ||
+            a.presenting !== b.presenting ||
+            a.camera?.x !== b.camera?.x ||
+            a.camera?.y !== b.camera?.y ||
+            a.camera?.scale !== b.camera?.scale ||
+            (a.camera === null) !== (b.camera === null)
+          ) {
+            return list;
+          }
+        }
+        return prev; // cursor-only change — no Board re-render
+      });
+      publishCursors(list);
     });
 
     const statusTimer = setInterval(() => {
@@ -228,6 +333,7 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
       clearInterval(statusTimer);
       unsubOthers();
       elementsMap.unobserveDeep(onDeep);
+      getPages(ydoc).unobserve(projectPagesNow);
       undoRef.current?.destroy();
       undoRef.current = null;
       leave();
@@ -266,10 +372,10 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
 
   const addEl = useCallback(
     (
-      kind: "rect" | "ellipse" | "sticky" | "text" | "frame",
+      kind: "rect" | "ellipse" | "sticky" | "text" | "code" | "math" | "custom",
       x: number,
       y: number,
-      opts?: { w?: number; h?: number },
+      opts?: { pageId?: string; w?: number; h?: number },
     ) => {
       const ydoc = ydocRef.current;
       if (!ydoc) throw new Error("board not ready");
@@ -279,21 +385,26 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
   );
 
   const addLineEl = useCallback(
-    (kind: "line" | "arrow", x1: number, y1: number, x2: number, y2: number) => {
+    (kind: "line" | "arrow", x1: number, y1: number, x2: number, y2: number, pageId?: string) => {
       const ydoc = ydocRef.current;
-      return ydoc ? addLineElement(ydoc, kind, x1, y1, x2, y2) : null;
+      return ydoc ? addLineElement(ydoc, kind, x1, y1, x2, y2, pageId) : null;
     },
     [],
   );
 
-  const addInkEl = useCallback((mode: "pen" | "highlighter", points: number[]) => {
+  const addInkEl = useCallback((mode: "pen" | "highlighter", points: number[], pageId?: string) => {
     const ydoc = ydocRef.current;
     if (!ydoc || points.length < 4) return null;
-    return addInkElement(ydoc, mode, points);
+    return addInkElement(ydoc, mode, points, pageId);
   }, []);
 
   const updateEl = useCallback((id: string, patch: ElementPatch) => {
     if (ydocRef.current) updateElement(ydocRef.current, id, patch);
+  }, []);
+
+  const updateEls = useCallback((patches: { id: string; patch: ElementPatch }[]) => {
+    const ydoc = ydocRef.current;
+    if (ydoc) updateElements(ydoc, patches);
   }, []);
 
   const duplicateEl = useCallback((id: string) => {
@@ -304,9 +415,9 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
   }, []);
 
   const pasteEls = useCallback(
-    (els: BoardElement[], offset: { x: number; y: number }) => {
+    (els: BoardElement[], offset: { x: number; y: number }, pageId?: string) => {
       const ydoc = ydocRef.current;
-      return ydoc ? pasteElements(ydoc, els, offset) : [];
+      return ydoc ? pasteElements(ydoc, els, offset, pageId) : [];
     },
     [],
   );
@@ -331,6 +442,40 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     if (ydocRef.current) deleteElement(ydocRef.current, id);
   }, []);
 
+  const seedPages = useCallback(() => {
+    if (ydocRef.current) ensurePages(ydocRef.current);
+  }, []);
+
+  const addPageCb = useCallback((index?: number, background?: string) => {
+    const ydoc = ydocRef.current;
+    return ydoc ? addPage(ydoc, index, background) : null;
+  }, []);
+
+  const duplicatePageCb = useCallback((pageId: string) => {
+    const ydoc = ydocRef.current;
+    return ydoc ? duplicatePage(ydoc, pageId) : null;
+  }, []);
+
+  const deletePageCb = useCallback((pageId: string) => {
+    const ydoc = ydocRef.current;
+    return ydoc ? deletePage(ydoc, pageId) : false;
+  }, []);
+
+  const movePageCb = useCallback((from: number, to: number) => {
+    const ydoc = ydocRef.current;
+    if (ydoc) movePage(ydoc, from, to);
+  }, []);
+
+  const setPageBackgroundCb = useCallback((pageId: string, background: string) => {
+    const ydoc = ydocRef.current;
+    if (ydoc) setPageBackground(ydoc, pageId, background);
+  }, []);
+
+  const moveElsToPage = useCallback((ids: string[], pageId: string) => {
+    const ydoc = ydocRef.current;
+    if (ydoc) moveElementsToPage(ydoc, ids, pageId);
+  }, []);
+
   const getSnapshot = useCallback(() => {
     const ydoc = ydocRef.current;
     return ydoc ? Y.encodeStateAsUpdate(ydoc) : null;
@@ -341,28 +486,75 @@ export function useBoard(roomId: string, identity: Identity): BoardApi {
     if (ydocRef.current) Y.applyUpdate(ydocRef.current, bytes, RESTORE_ORIGIN);
   }, []);
 
-  return {
-    elements,
-    status,
-    peers,
-    setCursor,
-    setCameraPresence,
-    setPresenting,
-    addEl,
-    addLineEl,
-    addInkEl,
-    updateEl,
-    duplicateEl,
-    pasteEls,
-    undo,
-    redo,
-    stopCapturing,
-    bringElToFront,
-    moveElForward,
-    moveElBackward,
-    sendElToBack,
-    deleteEl,
-    getSnapshot,
-    applySnapshot,
-  };
+  // Stable BoardApi identity: every callback is already useCallback'd with
+  // stable deps, so memoizing the wrapper keeps Board's effects that depend
+  // on `board` from re-running on every render.
+  return useMemo(
+    () => ({
+      elements,
+      pages,
+      status,
+      peers,
+      setCursor,
+      setCameraPresence,
+      setPresenting,
+      addEl,
+      addLineEl,
+      addInkEl,
+      updateEl,
+      updateEls,
+      duplicateEl,
+      pasteEls,
+      undo,
+      redo,
+      stopCapturing,
+      bringElToFront,
+      moveElForward,
+      moveElBackward,
+      sendElToBack,
+      deleteEl,
+      seedPages,
+      addPage: addPageCb,
+      duplicatePage: duplicatePageCb,
+      deletePage: deletePageCb,
+      movePage: movePageCb,
+      setPageBackground: setPageBackgroundCb,
+      moveElsToPage,
+      getSnapshot,
+      applySnapshot,
+    }),
+    [
+      elements,
+      pages,
+      status,
+      peers,
+      setCursor,
+      setCameraPresence,
+      setPresenting,
+      addEl,
+      addLineEl,
+      addInkEl,
+      updateEl,
+      updateEls,
+      duplicateEl,
+      pasteEls,
+      undo,
+      redo,
+      stopCapturing,
+      bringElToFront,
+      moveElForward,
+      moveElBackward,
+      sendElToBack,
+      deleteEl,
+      seedPages,
+      addPageCb,
+      duplicatePageCb,
+      deletePageCb,
+      movePageCb,
+      setPageBackgroundCb,
+      moveElsToPage,
+      getSnapshot,
+      applySnapshot,
+    ],
+  );
 }

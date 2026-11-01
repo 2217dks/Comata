@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { pickCursorColor } from "@comata/elements";
 import type { MemberRole, NotebookKind } from "@comata/schema";
@@ -13,11 +13,19 @@ type NotebookDetail = {
   id: string;
   title: string;
   kind: NotebookKind;
+  background: "light" | "dark";
   role: MemberRole;
   updatedAt: string;
 };
 
 const SNAPSHOT_INTERVAL_MS = 20_000;
+
+/** Byte-equality for the skip-unchanged snapshot save. */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
 
 export function NotebookPage() {
   const { id } = useParams<{ id: string }>();
@@ -104,17 +112,25 @@ function BoardSession({ notebook, identity }: { notebook: NotebookDetail; identi
   const readOnly = notebook.role === "VIEWER";
 
   // Load any persisted snapshot into the live doc (merge is CRDT-safe).
+  // Presentation notebooks then seed page 1 if the doc has none (idempotent —
+  // concurrent openers race to insert the same shape; Yjs resolves safely).
   useEffect(() => {
     void loadNotebookSnapshot(notebook.id).then((bytes) => {
       if (bytes) board.applySnapshot(bytes);
+      if (notebook.kind === "presentation") board.seedPages();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notebook.id]);
 
+  const lastSavedRef = useRef<Uint8Array | null>(null);
   const saveSnapshot = useCallback(async () => {
     if (readOnly) return;
     const bytes = board.getSnapshot();
     if (!bytes || bytes.byteLength === 0) return;
+    // Skip the upload when the doc is unchanged since the last save — the
+    // 20s timer used to re-encode + POST the whole doc even when idle.
+    if (lastSavedRef.current && bytesEqual(lastSavedRef.current, bytes)) return;
+    lastSavedRef.current = bytes;
     const ok = await saveNotebookSnapshot(notebook.id, bytes);
     if (!ok) console.warn("snapshot save failed");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,5 +148,15 @@ function BoardSession({ notebook, identity }: { notebook: NotebookDetail; identi
     };
   }, [saveSnapshot]);
 
-  return <Board board={board} identity={identity} title={notebook.title} kind={notebook.kind} readOnly={readOnly} />;
+  return (
+    <Board
+      board={board}
+      identity={identity}
+      title={notebook.title}
+      kind={notebook.kind}
+      background={notebook.background}
+      readOnly={readOnly}
+      notebookId={notebook.id}
+    />
+  );
 }

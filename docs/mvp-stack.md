@@ -21,9 +21,9 @@
 | Auth | **Better-Auth** (Prisma adapter) on Supabase | same (D15); D8 stub skipped for MVP |
 | Code editor | **CodeMirror 6** | same (D11) |
 | Math | **KaTeX + math.js** | same (D12) |
-| Math viz | **MathBox.js** behind `packages/math-engine` | — (dormant upstream — kept swappable) |
-| Sandbox | **Judge0 CE** in plain Docker | Docker + gVisor custom runner (D5/RFC-003) |
-| Queue | **Valkey + BullMQ** (VPS only) | same (D17) |
+| Math viz | **Canvas2D (hand-rolled 2D) + raw three.js (3D)** — Slice 5 settled; MathBox cut (dormant upstream) | — |
+| Sandbox | **Piston, self-hosted** (single Docker container) behind `packages/runner` | Docker + gVisor custom runner (D5/RFC-003) |
+| Queue | **none** — runs are synchronous HTTP (ADR-0002) | Valkey + BullMQ (D17) if scale demands |
 | Object storage | defer (Supabase Storage if needed) | MinIO/S3 (`packages/storage`) |
 | Testing | **Vitest only** | + Playwright, k6, testcontainers (D19) |
 | Lint/format | none during MVP | ESLint (coding-standards) — add Biome before first contributor |
@@ -34,7 +34,7 @@
 - **Why:** schema-first DX, instant migrations (`prisma migrate dev`), typed client — fastest iteration loop for a solo prototype. **Prisma 7 stable** — ESM-first `prisma-client` generator, Rust-free client; driver adapters are the standard runtime.
 - **Serverless setup:** `@prisma/adapter-pg` + Supabase **pgBouncer pooled URL (port 6543)** as `DATABASE_URL` for runtime, direct URL (port 5432) as `DIRECT_URL` for migrations. Details in [data-model.md](data-model.md) §4.
 - **Better-Auth:** Better-Auth's Prisma adapter so `User`/`Session`/`Account` live in the same schema — one migration source of truth.
-- **Data model:** ER-first, models derived — see [data-model.md](data-model.md). Core entities: `User`, `Notebook` (the project container), `NotebookMember`, `CodeRun`.
+- **Data model:** ER-first, models derived — see [data-model.md](data-model.md). Core entities: `User`, `Notebook` (the project container), `NotebookMember`.
 - **Notebook portability:** export/import via `packages/format` → `.comata` file — see [notebook-format.md](notebook-format.md).
 
 ## 2. Deployment topology
@@ -42,22 +42,21 @@
 ```
 ┌──────────────────────────── Vercel / Netlify ────────────────────────────┐
 │  apps/web    Vite + React SPA (static)                                   │
-│  apps/api    Hono on Node serverless ── POST /enqueue (auth'd) ──┐       │
-└──────────────────────────────────────────────────────────────│──────────┘
+│  apps/api    Hono on Node serverless ── sync POST /runs ──┐              │
+└───────────────────────────────────────────────────────│───┘──────────────┘
       │ Liveblocks realtime          │ Prisma → pgBouncer:6543  │ HTTPS
       ▼                              ▼                          ▼
-┌─ Liveblocks cloud ─┐   ┌─ Supabase ────────────┐   ┌─ VPS (Oracle free / $5 Hetzner) ─┐
-│ rooms, presence,   │   │ Postgres: metadata,   │   │ Valkey + BullMQ worker            │
-│ Yjs doc persistence│   │ snapshots, auth tables│   │  └─► Judge0 CE (Docker)           │
-└────────────────────┘   └───────────────────────┘   │      results → Supabase via Prisma│
-                                                     └───────────────────────────────────┘
+┌─ Liveblocks cloud ─┐   ┌─ Supabase ────────────┐   ┌─ Runner host ─────────────────┐
+│ rooms, presence,   │   │ Postgres: metadata,   │   │ Piston (Docker) — dev: Mac,   │
+│ Yjs doc persistence│   │ snapshots, auth tables│   │ deploy: cheap VPS             │
+└────────────────────┘   └───────────────────────┘   └───────────────────────────────┘
 ```
 
 **Wiring rules:**
-1. **Vercel never talks to Valkey directly.** `apps/api` calls a token-authenticated enqueue endpoint on the VPS; `apps/worker` pulls from Valkey and drives Judge0.
-2. **Yjs is the state truth.** Liveblocks is transport + persistence only (`@liveblocks/yjs`). Supabase stores doc metadata + periodic Yjs snapshots, never geometry.
-3. **VPS choice:** Oracle Cloud free tier (4 ARM cores / 24 GB — free forever) or ~$5/mo Hetzner CX22.
-4. **Judge0 stays internal:** bound to localhost / VPN on the VPS; only `apps/worker` calls it.
+1. **Runs are synchronous** (ADR-0002): `apps/api` → self-hosted Piston, result in the HTTP response. No queue, no worker, no Valkey in MVP.
+2. **Yjs is the state truth.** Liveblocks is transport + persistence only (`@liveblocks/yjs`). Supabase stores doc metadata + periodic Yjs snapshots, never geometry. Run results are never persisted (ADR-0003).
+3. **Runner host:** the dev Mac during development (LAN users welcome); a cheap VPS only at MVP deploy.
+4. **Piston stays internal:** bound to localhost / VPN on the host; only `apps/api` calls it.
 
 ## 3. Estimated cost
 
@@ -74,5 +73,5 @@
 1. **Cloud services in core paths** (Liveblocks, Supabase) — deviates from D7 self-host-first. Accepted for MVP; both sit behind thin providers so the swap is contained.
 2. **Konva ≠ custom PixiJS (D3)** — Konva renders the same projected doc view; the swap touches only the renderer package.
 3. **Judge0 ≠ gVisor runner (D5)** — the worker wraps Judge0 behind the runner interface from RFC-003, so production hardening replaces one module.
-4. **MathBox maintenance risk** — isolated in `packages/math-engine`; escape hatch is function-plot (2D) / raw three.js.
+4. **MathBox maintenance risk** — cut during Slice 5 grilling; 2D is a hand-rolled Canvas2D Desmos-lite plot, 3D is raw three.js + OrbitControls, both as DOM overlays reusing the Slice 4 overlay machinery.
 5. **Liveblocks Free per-room connection cap** — verify the current limit during Slice 1; 5–6 users should fit.

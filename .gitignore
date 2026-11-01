@@ -19,8 +19,22 @@ coverage/
 .netlify/
 *.local
 
-# OS
+# OS / macOS shenanigans
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# Claude Code local settings
+.claude/
 
 # Generated Prisma client
 packages/db/src/generated/

@@ -1389,3 +1389,1200 @@ body {
 .math-text .katex {
   font-size: 1.1em;
 }
+
+/* ── Code element editor (Slice 4) ─────────────────────────────────────── */
+
+/* Camera-space container for ONE code block in the z-banded sandwich — the
+   band stages before/after it in DOM order provide the z separation, so no
+   z-index tricks are needed: DOM order IS the global z order. */
+.code-layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: top left;
+  pointer-events: none;
+}
+
+/* Edit-mode band lift: bands are position:absolute siblings with z-auto in
+   the .board-canvas stacking context; the input stage (rendered after every
+   band) wins the pointer by DOM order. When a band's block is edited, the
+   band lifts above the input stage with z-index — and bands above it lift
+   HIGHER, so the whole stack keeps its true z. NO REMOUNT happens: the
+   editors are the same React instances, so CodeMirror history, math
+   sliders/orbit and iframe state survive edit-mode enter/exit (until page
+   unload). All lifted bands stay pointer-transparent — the input stage still
+   hit-tests everything; the editor content itself re-enables its own
+   pointer events via its existing interactive/editing classes.
+   Values sit BELOW the topbar (z-10) and tool dock (z-15): lifted bands must
+   cover the input stage, never the app chrome. */
+.band-editing {
+  z-index: 5;
+}
+.band-above {
+  z-index: 6;
+}
+
+/* Band display stages sit in normal flow (DOM order = z order). All pointer
+   events go to the input stage rendered after every band. */
+.board-canvas > .konvajs-content {
+  position: absolute;
+  inset: 0;
+}
+
+/* The code element IS this box (no preview/edit split): geometry from the
+   element, camera transform from the layer. Children reflow as the element
+   resizes — Figma auto-layout feel. Chrome stays at constant pixel size. */
+.code-editor {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #161a23;
+  border: 1.5px solid #3a4256;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+/* Interactive only while selected (and Select tool active) — otherwise the
+   element is a visible but pointer-transparent card that pen/shapes/arrows
+   draw straight over. */
+.code-editor-passive {
+  pointer-events: none;
+}
+.code-editor:not(.code-editor-passive) {
+  pointer-events: auto;
+  border-color: #6c8cff;
+}
+
+.code-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  flex: none;
+}
+
+.code-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  flex: none;
+}
+
+.code-filename {
+  width: 130px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #d7dde8;
+  font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 4px 8px;
+  outline: none;
+}
+.code-filename:focus {
+  border-color: #6c8cff;
+}
+.code-filename:disabled {
+  opacity: 0.6;
+}
+
+.code-language {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #d7dde8;
+  font: 500 12px inherit;
+  padding: 4px 6px;
+  outline: none;
+  cursor: pointer;
+}
+
+.code-scale {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.code-scale button {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #aab3c7;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+}
+.code-scale button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+.code-scale button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.code-run {
+  background: #7ede9c;
+  border: none;
+  border-radius: 6px;
+  color: #10241a;
+  font: 700 12px inherit;
+  padding: 5px 14px;
+  cursor: pointer;
+  min-width: 68px;
+}
+.code-run:hover:not(:disabled) {
+  background: #93ecab;
+}
+.code-run:disabled {
+  background: #3a4256;
+  color: #8b93a7;
+  cursor: default;
+}
+
+.code-mirror-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #161a23;
+}
+.code-mirror-host .cm-editor {
+  height: 100%;
+  background: transparent;
+  font-size: inherit;
+}
+.code-mirror-host .cm-editor.cm-focused {
+  outline: none;
+}
+.code-mirror-host .cm-scroller {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.5;
+}
+.code-mirror-host .cm-gutters {
+  background: transparent;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  color: #4d5568;
+}
+.code-mirror-host .cm-activeLine {
+  background: rgba(255, 255, 255, 0.04);
+}
+.code-mirror-host .cm-content {
+  caret-color: #6c8cff;
+  color: #d7dde8;
+}
+
+.code-tabs {
+  height: 34px;
+  display: flex;
+  gap: 4px;
+  padding: 0 8px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  flex: none;
+}
+
+.code-tab {
+  background: transparent;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  color: #8b93a7;
+  font: 600 12px inherit;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.code-tab:hover {
+  color: #d7dde8;
+}
+.code-tab.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.code-pane {
+  height: 110px;
+  flex: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  overflow: auto;
+  margin: 0;
+}
+
+.code-stdin,
+.code-stdout,
+.code-stderr {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-stdin {
+  color: #d7dde8;
+}
+.code-stdin::placeholder {
+  color: rgba(148, 163, 184, 0.4);
+}
+
+.code-stdout {
+  color: #9fe8b5;
+}
+
+.code-stderr {
+  color: #ff9d9d;
+}
+
+/* ── Math element editor (Slice 5) ─────────────────────────────────────── */
+
+/* Camera-space container for ONE math block in the z-banded sandwich — same
+   model as .code-layer: DOM order IS the global z order. */
+.math-layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: top left;
+  pointer-events: none;
+}
+
+/* The math element IS this box (no preview/edit split): geometry from the
+   element, camera transform from the layer. */
+.math-editor {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1.5px solid #dfe3ec;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.math-editor-passive {
+  pointer-events: none;
+}
+.math-editor:not(.math-editor-passive) {
+  pointer-events: auto;
+  border-color: #6c8cff;
+}
+
+.math-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  height: 38px;
+  flex: none;
+  background: #f7f8fb;
+  border-bottom: 1px solid #e7eaf0;
+}
+.math-title {
+  font: 700 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #475069;
+  padding: 0 4px;
+}
+.math-flex {
+  flex: 1;
+}
+.math-mode-toggle {
+  display: flex;
+  background: rgba(108, 140, 255, 0.08);
+  border-radius: 7px;
+  padding: 2px;
+}
+.math-mode-toggle button {
+  border: none;
+  background: transparent;
+  color: #5b6478;
+  font: 600 11px inherit;
+  padding: 3px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.math-mode-toggle button.active {
+  background: #ffffff;
+  color: #2c3550;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.15);
+}
+
+.math-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ── Sidebar (Desmos-lite expression list) ──────────────────────────────── */
+.math-sidebar {
+  width: 190px;
+  flex: none;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fbfcfe;
+  border-right: 1px solid #e7eaf0;
+}
+.math-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.math-vis {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 2px solid;
+  background: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.math-vis span {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.math-expr {
+  flex: 1;
+  min-width: 0;
+  border: 1.5px solid #dfe3ec;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2c3550;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 4px 7px;
+  outline: none;
+}
+.math-expr:focus {
+  border-color: #6c8cff;
+}
+.math-expr:disabled {
+  background: #f4f6fa;
+  color: #5b6478;
+}
+.math-row-del {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: #9aa4b8;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px;
+}
+.math-row-del:hover {
+  color: #ef4444;
+}
+.math-err {
+  width: 100%;
+  color: #ef4444;
+  font-size: 10.5px;
+  padding-left: 25px;
+  line-height: 1.3;
+}
+.math-add-expr {
+  border: 1.5px dashed #cdd4e2;
+  background: transparent;
+  color: #5b6478;
+  border-radius: 6px;
+  padding: 5px;
+  font: 500 12px inherit;
+  cursor: pointer;
+}
+.math-add-expr:hover {
+  border-color: #6c8cff;
+  color: #6c8cff;
+}
+
+/* Free-variable slider offers (Desmos "add slider" prompt). */
+.math-param-offers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.math-param-offer {
+  border: 1px solid rgba(108, 140, 255, 0.4);
+  background: rgba(108, 140, 255, 0.06);
+  color: #475069;
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.math-param-offer code {
+  font-weight: 700;
+  color: #6c8cff;
+}
+.math-param-offer:hover {
+  background: rgba(108, 140, 255, 0.14);
+}
+
+/* Sliders — defaults shared, live values per-user local. */
+.math-param {
+  border-top: 1px solid #eef1f6;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.math-param-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.math-param-name {
+  font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #2c3550;
+}
+.math-param-val {
+  flex: 1;
+  text-align: right;
+  font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #6b7280;
+}
+.math-param-reset {
+  border: none;
+  background: transparent;
+  color: #9aa4b8;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+}
+.math-param-reset:hover {
+  color: #6c8cff;
+}
+.math-param input[type="range"] {
+  width: 100%;
+  height: 18px;
+  cursor: pointer;
+}
+.math-param-bounds {
+  display: flex;
+  gap: 4px;
+}
+.math-param-bounds input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #dfe3ec;
+  border-radius: 4px;
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #5b6478;
+  padding: 2px 4px;
+  outline: none;
+}
+
+/* ── Plot area ──────────────────────────────────────────────────────────── */
+.math-plot {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  background: #ffffff;
+}
+.math-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.math-3d-host {
+  position: absolute;
+  inset: 0;
+}
+.math-3d-host canvas {
+  display: block;
+}
+.math-plot-err {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 4px 8px;
+  pointer-events: none;
+}
+.math-err-hint {
+  color: #b45309;
+}
+
+/* ── Custom element (AI-generated widget, Slice 5b) ────────────────────────── */
+
+.custom-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.custom-editor {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #14121e;
+  border: 1.5px solid #9a6cff;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.custom-editor-editing {
+  border-color: #c9b8ff;
+  box-shadow: 0 16px 44px rgba(154, 108, 255, 0.25);
+}
+.custom-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  background: #1a1626;
+  border-bottom: 1px solid rgba(154, 108, 255, 0.25);
+  cursor: grab;
+  user-select: none;
+  flex: none;
+}
+.custom-toolbar:active {
+  cursor: grabbing;
+}
+.custom-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c9b8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.custom-flex {
+  flex: 1;
+}
+.custom-done {
+  background: #9a6cff;
+  color: #14121e;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.custom-done:hover {
+  background: #b39aff;
+}
+.custom-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #12141a;
+}
+.custom-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  transition: opacity 0.25s ease;
+}
+.custom-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #6b7280;
+  font-size: 12px;
+  pointer-events: none;
+}
+.custom-interact-hint {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(154, 108, 255, 0.9);
+  color: #14121e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* Generating state: wavy animated bars, visible to every viewer. */
+.custom-generating {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+}
+.custom-waves {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  height: 36px;
+}
+.custom-waves span {
+  width: 7px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #c9b8ff, #9a6cff);
+  animation: custom-wave 1.1s ease-in-out infinite;
+}
+.custom-waves span:nth-child(1) { animation-delay: 0s; height: 40%; }
+.custom-waves span:nth-child(2) { animation-delay: 0.12s; height: 70%; }
+.custom-waves span:nth-child(3) { animation-delay: 0.24s; height: 100%; }
+.custom-waves span:nth-child(4) { animation-delay: 0.36s; height: 70%; }
+.custom-waves span:nth-child(5) { animation-delay: 0.48s; height: 40%; }
+@keyframes custom-wave {
+  0%, 100% { transform: scaleY(0.5); opacity: 0.6; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+.custom-gen-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c9b8ff;
+}
+.custom-gen-prompt {
+  font-size: 11px;
+  color: #8b93a7;
+  max-width: 90%;
+  max-height: 3.2em;
+  overflow: hidden;
+  text-align: center;
+  line-clamp: 2;
+}
+
+/* Error card. */
+.custom-error-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+}
+.custom-error-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f87171;
+}
+.custom-error-msg {
+  font-size: 11px;
+  color: #8b93a7;
+  max-height: 6em;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* ── AI Create modal + edit-prompt dialog ──────────────────────────────────── */
+
+/* Full-screen dimmed backdrop; canvas is unreachable while the modal is open. */
+.ai-create-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(6, 8, 12, 0.55);
+  backdrop-filter: blur(2px);
+  display: grid;
+  place-items: center;
+}
+.ai-create-popup {
+  width: min(480px, calc(100vw - 48px));
+  background: #17181f;
+  border: 1px solid #2c3040;
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.ai-create-tabs {
+  display: flex;
+  border-bottom: 1px solid #2c3040;
+}
+.ai-create-tabs button {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #8b93a7;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 9px 0;
+  cursor: pointer;
+}
+.ai-create-tabs button.active {
+  color: #c9b8ff;
+  box-shadow: inset 0 -2px 0 #9a6cff;
+}
+.ai-create-new {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  gap: 8px;
+}
+.ai-create-new textarea {
+  resize: none;
+  height: 120px;
+  background: #101218;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  color: #e7eaf0;
+  font-size: 13px;
+  padding: 10px 12px;
+  outline: none;
+  line-height: 1.5;
+}
+.ai-create-new textarea:focus {
+  border-color: #9a6cff;
+}
+.ai-create-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ai-create-hint {
+  font-size: 11px;
+  color: #6b7280;
+}
+.ai-create-send {
+  background: linear-gradient(135deg, #9a6cff, #6c8cff);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.ai-create-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ai-create-library {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-lib-status {
+  color: #6b7280;
+  font-size: 12px;
+  padding: 14px 8px;
+  text-align: center;
+}
+.ai-lib-error {
+  color: #f87171;
+}
+.ai-lib-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: #101218;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.ai-lib-entry:hover {
+  border-color: #9a6cff;
+}
+.ai-lib-title {
+  color: #e7eaf0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ai-lib-desc {
+  color: #8b93a7;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.ai-lib-meta {
+  color: #4b5563;
+  font-size: 10px;
+}
+
+.edit-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.5);
+  display: grid;
+  place-items: center;
+}
+.edit-prompt-dialog {
+  width: 380px;
+  background: #17181f;
+  border: 1px solid #2c3040;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.edit-prompt-dialog h4 {
+  margin: 0;
+  color: #e7eaf0;
+  font-size: 14px;
+}
+.edit-prompt-dialog textarea {
+  resize: none;
+  height: 80px;
+  background: #101218;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  color: #e7eaf0;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+}
+.edit-prompt-dialog textarea:focus {
+  border-color: #9a6cff;
+}
+.edit-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.edit-prompt-actions button:first-child {
+  background: none;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  color: #8b93a7;
+  font-size: 12px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+/* ── AI admin page ──────────────────────────────────────────────────────────── */
+
+.ai-admin {
+  max-width: 560px;
+  margin: 48px auto;
+  padding: 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-admin-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.ai-admin-back {
+  color: #8b93a7;
+  font-size: 13px;
+  text-decoration: none;
+}
+.ai-admin-back:hover {
+  color: #c9b8ff;
+}
+.ai-admin-head h2 {
+  margin: 0;
+  color: #e7eaf0;
+  font-size: 18px;
+}
+.ai-admin-sub {
+  margin: 0;
+  color: #8b93a7;
+  font-size: 13px;
+}
+.ai-admin-grant {
+  display: flex;
+  gap: 8px;
+}
+.ai-admin-grant input {
+  flex: 1;
+  background: #101218;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  color: #e7eaf0;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+}
+.ai-admin-grant input:focus {
+  border-color: #9a6cff;
+}
+.ai-admin-grant button {
+  background: #9a6cff;
+  color: #14121e;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.ai-admin-grant button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ai-admin-error {
+  color: #f87171;
+  font-size: 12px;
+}
+.ai-admin-status {
+  color: #6b7280;
+  font-size: 13px;
+  padding: 12px 0;
+}
+.ai-admin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #101218;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.ai-admin-email {
+  color: #e7eaf0;
+  font-size: 13px;
+}
+.ai-admin-you {
+  color: #9a6cff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ai-admin-flex {
+  flex: 1;
+}
+.ai-admin-revoke {
+  background: none;
+  border: 1px solid #2c3040;
+  border-radius: 6px;
+  color: #8b93a7;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.ai-admin-revoke:hover {
+  color: #f87171;
+  border-color: #f87171;
+}
+
+/* ── Page sidebar (Slice 7 — presentation decks) ────────── */
+
+.page-sidebar {
+  position: absolute;
+  left: 14px;
+  top: 74px;
+  bottom: 14px;
+  width: 148px;
+  z-index: 30; /* above the page surface — but the page FIT leaves gutter room, so it never covers the slide */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 8px;
+  background: #1e2128;
+  border: 1px solid #2e3340;
+  border-radius: 12px;
+  z-index: 15;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* Tool dock shifts right of the sidebar in decks */
+.board-root.deck .tool-dock {
+  left: 178px;
+}
+
+.page-thumb {
+  position: relative;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.page-thumb.dragging {
+  opacity: 0.45;
+}
+
+.page-thumb-btn {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.page-thumb-canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  border-radius: 6px;
+  border: 1.5px solid #3a4256;
+  font-size: 13px;
+  font-weight: 700;
+  transition: border-color 0.12s ease;
+}
+
+.page-thumb.active .page-thumb-canvas {
+  border-color: #6c8cff;
+  box-shadow: 0 0 0 1.5px #6c8cff;
+}
+
+.page-thumb:hover .page-thumb-canvas {
+  border-color: #6c8cff88;
+}
+
+.page-thumb-meta {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: none;
+  align-items: center;
+  gap: 3px;
+  background: rgba(19, 22, 30, 0.92);
+  border-radius: 6px;
+  padding: 2px 3px;
+}
+
+.page-thumb:hover .page-thumb-meta {
+  display: flex;
+}
+
+.page-thumb-act {
+  border: 0;
+  background: none;
+  color: #aeb4c4;
+  font-size: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.page-thumb-act:hover:not(:disabled) {
+  background: #2b303c;
+  color: #ffffff;
+}
+
+.page-thumb-act:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.page-bg-picker {
+  position: absolute;
+  top: -6px;
+  right: 0;
+  transform: translateY(-100%);
+  display: flex;
+  gap: 4px;
+  background: rgba(19, 22, 30, 0.95);
+  border: 1px solid #2e3340;
+  border-radius: 8px;
+  padding: 6px;
+  z-index: 5;
+}
+
+.page-bg-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid #3a4256;
+  cursor: pointer;
+  padding: 0;
+}
+
+.page-bg-swatch:hover {
+  border-color: #ffffff;
+}
+
+.page-add {
+  border: 1.5px dashed #3a4256;
+  background: none;
+  color: #aeb4c4;
+  border-radius: 8px;
+  padding: 9px 0;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.page-add:hover {
+  border-color: #6c8cff;
+  color: #6c8cff;
+}
+
+/* Present mode: page 1 of 1 fit; sidebar hidden by component (isPresent). */
+
+/* Create-modal background picker (canvas light/dark, fixed at creation) */
+.kind-bg {
+  flex-direction: row;
+  align-items: center;
+}
+
+.bg-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid #3a4256;
+  flex-shrink: 0;
+}
+
+/* Context-menu section label (Move to page ▸) */
+.ctx-section {
+  padding: 5px 12px 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a8194;
+  cursor: default;
+}
+
+/* Deck page surface: 1920×1080 world rect, camera-transformed by Board */
+.deck-page-surface {
+  position: absolute;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Present mode: interactive bands (code/math/custom) sit above the input
+   stage so their DOM receives clicks — without the edit-mode lift wars. */
+.band-present {
+  z-index: 5;
+}
+
+/* Deck mode (Slice 7 rework): the page IS the workspace — no infinite-canvas
+   dressing, no pan/zoom, nothing exists outside the slide. */
+.board-root.deck {
+  background-image: none;
+}
+
+.presenting .board-canvas,
+.deck .board-canvas {
+  overflow: hidden;
+}

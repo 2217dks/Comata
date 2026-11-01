@@ -1,8 +1,7 @@
-import { memo, useEffect, useRef } from "react";
-import type { KonvaEventObject } from "konva/lib/Node";
+import { memo, useRef } from "react";
 import type Konva from "konva";
 import { Arrow, Ellipse, Group, Line, Path, Rect, Text } from "react-konva";
-import type { BoardElement, ElementPatch, InkShape } from "@comata/elements";
+import type { BoardElement, CodeShape, InkShape } from "@comata/elements";
 
 /** True when a text payload carries inline KaTeX segments ($…$). */
 export function hasMath(text: string): boolean {
@@ -34,84 +33,46 @@ export function smoothInkPath(points: number[]): string {
 
 export type ElementViewProps = {
   el: BoardElement;
-  /** Whether the element layer accepts pointer events (Select mode only). */
-  interactive: boolean;
   /** Part of the current (possibly multi-element) selection. */
   selected?: boolean;
-  /** The element currently being text-edited — its Konva text hides so the
-   * DOM textarea is the single source of pixels (no double rendering). */
-  editingId: string | null;
-  onTransform: (id: string, patch: ElementPatch) => void;
+  /** This element is being text-edited — its Konva text hides so the
+   * DOM textarea is the single source of pixels (no double rendering).
+   * A per-element boolean (not a shared id) so the memo only flips for the
+   * one edited element, not the whole board. */
+  editing?: boolean;
   onEdit: (id: string) => void;
 };
 
 /**
- * One Konva Group per element — a pure render + hit-target surface. All
- * movement is handled by the Board's pointer state machine (so dragging a
- * multi-selection moves the whole selection, tldraw-style); the Transformer
- * in Board attaches to the selected group for resize/rotate.
- *
- * Ink strokes are click-immune (rule: strokes are only selectable via
- * rectangle/lasso select).
+ * One Konva Group per element — a pure DISPLAY surface. Band stages are
+ * non-interactive: all pointer handling lives in the Board's input stage
+ * (manual hit-testing) and resize/rotate drives invisible TransformerProxy
+ * nodes there. This component only draws pixels.
  *
  * Memoized (with identity-stabilized elements from useBoard) so editing one
  * element doesn't re-render every other shape — the tldraw perf model.
  */
 export const ElementView = memo(function ElementView({
   el,
-  interactive,
   selected = false,
-  editingId,
-  onTransform,
-  onEdit,
+  editing = false,
 }: ElementViewProps) {
-  const hitTarget = interactive && (el.kind !== "ink" || selected);
   const groupRef = useRef<Konva.Group | null>(null);
 
-  // The Transformer's selection box must equal the HITBOX — the original edge
-  // box — never the "full size" (outer/middle border overhang would otherwise
-  // inflate it). Overriding getClientRect pins it to exactly w×h; normalized
-  // for lines/arrows whose w/h are signed offsets.
-  useEffect(() => {
-    const g = groupRef.current;
-    if (!g) return;
-    const x0 = Math.min(0, el.w);
-    const y0 = Math.min(0, el.h);
-    g.getClientRect = () => ({ x: x0, y: y0, width: Math.abs(el.w), height: Math.abs(el.h) });
-  });
-
-  const commitTransform = (e: KonvaEventObject<Event>) => {
-    if (!hitTarget) return;
-    const node = e.target;
-    const sx = node.scaleX();
-    const sy = node.scaleY();
-    node.scaleX(1);
-    node.scaleY(1);
-    onTransform(el.id, {
-      x: node.x(),
-      y: node.y(),
-      rotation: node.rotation(),
-      w: Math.max(8, Math.round(el.w * sx * 100) / 100),
-      h: Math.max(8, Math.round(el.h * sy * 100) / 100),
-    });
-  };
+  // Lines/arrows have signed endpoint offsets — normalize the draw box.
+  const drawX = Math.min(0, el.w);
+  const drawY = Math.min(0, el.h);
 
   return (
     <Group
       ref={groupRef}
-      id={el.id}
-      name="element"
       x={el.x}
       y={el.y}
       rotation={el.rotation}
       opacity={el.opacity}
-      listening={hitTarget}
-      onTransformEnd={commitTransform}
-      onDblClick={() => {
-        if (hitTarget && (el.kind === "sticky" || el.kind === "text")) onEdit(el.id);
-      }}
+      listening={false}
     >
-      <ElementChildren el={el} editing={editingId === el.id} selected={selected} />
+      <ElementChildren el={el} editing={editing} selected={selected} />
     </Group>
   );
 });
@@ -313,29 +274,6 @@ function ElementChildren({ el, editing, selected }: { el: BoardElement; editing:
       );
     }
 
-    case "frame":
-      return (
-        <>
-          <Rect
-            width={el.w}
-            height={el.h}
-            fill={el.fill}
-            cornerRadius={8}
-            stroke="#3d4354"
-            strokeWidth={1}
-            dash={[8, 6]}
-          />
-          <Text
-            text={el.name}
-            y={-26}
-            fontSize={13}
-            fill="#8b93a7"
-            fontStyle="600"
-            listening={false}
-          />
-        </>
-      );
-
     case "custom":
       return (
         <>
@@ -374,5 +312,51 @@ function ElementChildren({ el, editing, selected }: { el: BoardElement; editing:
           />
         </>
       );
+
+    case "code": {
+      // Pixels live in the DOM layer (CodeElementEditor, camera-space) —
+      // Konva here is only the selection frame + hit region so clicks land
+      // on the element. The fill is invisible but must be SOLID on the hit
+      // canvas — a ~0 alpha makes Konva's pixel hit-test fail and clicks
+      // fall through to elements behind.
+      return (
+        <Rect
+          width={el.w}
+          height={el.h}
+          fill={selected ? "rgba(0,0,0,0.001)" : "transparent"}
+          cornerRadius={10}
+          stroke={selected ? "#6c8cff" : "rgba(0,0,0,0.001)"}
+          strokeWidth={selected ? 2 : 1}
+          hitFunc={(ctx, shape) => {
+            ctx.beginPath();
+            ctx.rect(0, 0, shape.width(), shape.height());
+            ctx.closePath();
+            ctx.fillStrokeShape(shape);
+          }}
+        />
+      );
+    }
+
+    case "math": {
+      // Same overlay contract as code: pixels live in the DOM layer
+      // (MathElementEditor, camera-space); Konva draws only the selection
+      // frame + hit region. The fill must be SOLID on the hit canvas.
+      return (
+        <Rect
+          width={el.w}
+          height={el.h}
+          fill={selected ? "rgba(0,0,0,0.001)" : "transparent"}
+          cornerRadius={10}
+          stroke={selected ? "#6c8cff" : "rgba(0,0,0,0.001)"}
+          strokeWidth={selected ? 2 : 1}
+          hitFunc={(ctx, shape) => {
+            ctx.beginPath();
+            ctx.rect(0, 0, shape.width(), shape.height());
+            ctx.closePath();
+            ctx.fillStrokeShape(shape);
+          }}
+        />
+      );
+    }
   }
 }

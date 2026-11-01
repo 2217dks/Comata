@@ -1,7 +1,8 @@
 import type { BoardElement, ElementKind } from "./kinds";
 import {
+  createCodeElement,
   createEllipseElement,
-  createFrameElement,
+  createMathElement,
   createRectElement,
   createStickyElement,
   createTextElement,
@@ -101,15 +102,6 @@ export const ELEMENT_REGISTRY: Record<ElementKind, ElementMeta> = {
     props: ["fill", "fontSize", "textStyle", "align", "opacity"],
     create: createTextElement,
   },
-  frame: {
-    label: "Frame",
-    shortcut: "F",
-    tool: false, // removed from the dock (frames cut); renderer kept for legacy docs
-    placement: "click",
-    resizable: true,
-    props: ["opacity"],
-    create: createFrameElement,
-  },
   custom: {
     label: "Custom element",
     shortcut: "",
@@ -117,5 +109,27 @@ export const ELEMENT_REGISTRY: Record<ElementKind, ElementMeta> = {
     placement: "click",
     resizable: true,
     props: ["opacity"],
+  },
+  code: {
+    label: "Code",
+    shortcut: "", // no dock shortcut yet — placed via the dock button
+    tool: true,
+    placement: "click",
+    resizable: true,
+    // No opacity: the editor's pixels are DOM, the Konva layer only draws the
+    // selection frame — an opacity control would be a no-op.
+    props: [],
+    create: createCodeElement,
+  },
+  math: {
+    label: "Math",
+    shortcut: "", // placed via the dock button
+    tool: true,
+    placement: "click",
+    resizable: true,
+    // No opacity: the plot's pixels are DOM, the Konva layer only draws the
+    // selection frame — an opacity control would be a no-op.
+    props: [],
+    create: createMathElement,
   },
 };

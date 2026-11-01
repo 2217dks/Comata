@@ -139,7 +139,8 @@ model Notebook {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   members       NotebookMember[]
-  runs          CodeRun[]
+  /// Owner-controlled: whether VIEWERs may run code (ADR-0003). Default off.
+  allowViewerRuns Boolean    @default(false)
 
   @@index([ownerId, updatedAt])
 }
@@ -167,33 +168,9 @@ enum MemberRole {
   // COMMENTER — deferred (product-scope.md)
 }
 
-/// Execution history for code elements. `elementId` refers to an element inside
-/// the notebook's Yjs doc — deleting the element keeps run history until the
-/// notebook is deleted (cascade).
-model CodeRun {
-  id         String    @id @default(uuid()) @db.Uuid
-  notebookId String    @db.Uuid
-  elementId  String    @db.Uuid
-  lang       String
-  stdin      String?
-  stdout     String?
-  stderr     String?
-  exitCode   Int?
-  timeMs     Int?
-  status     RunStatus @default(QUEUED)
-  createdAt  DateTime  @default(now())
-  notebook   Notebook  @relation(fields: [notebookId], references: [id], onDelete: Cascade)
-
-  @@index([notebookId, elementId, createdAt])
-}
-
-enum RunStatus {
-  QUEUED
-  RUNNING
-  DONE
-  ERROR
-  TIMEOUT
-}
+// CodeRun removed (ADR-0003): runs are per-user and ephemeral — results go only
+// to the requesting client and are never persisted. Concurrency is guarded by an
+// in-memory per-user run lock + rate limit in apps/api, not by DB rows.
 ```
 
 ## 3. Integrity rules (the "nothing breaks" checklist)
@@ -202,9 +179,9 @@ enum RunStatus {
 |---|---|
 | Every notebook has exactly one OWNER | `Notebook.ownerId` + an `OWNER` row in `NotebookMember` created in the same transaction |
 | Roles map to room scopes | `OWNER`/`EDITOR` → read-write Liveblocks token; `VIEWER` → read-only token. One `can(user, role, action)` helper in `apps/api` |
-| SQL never stores geometry | Only `yjsSnapshot` (opaque binary) + run history + membership |
-| Deleting a notebook cleans up | `onDelete: Cascade` on members and runs; Liveblocks room deletion via API hook; Storage objects reaped by the worker |
-| Orphan code runs impossible | `CodeRun.notebookId` FK with cascade; `elementId` is intentionally a plain UUID (element lifecycle is CRDT-owned) |
+| SQL never stores geometry | Only `yjsSnapshot` (opaque binary) + membership |
+| Deleting a notebook cleans up | `onDelete: Cascade` on members; Liveblocks room deletion via API hook; Storage objects reaped by the worker |
+| One run per user at a time | In-memory per-user run lock in `apps/api` (notebook-wide); plus per-user rate limit (5/min) — nothing persisted (ADR-0002/0003) |
 | Snapshot/room consistency | Room id = `notebook:{Notebook.id}`; snapshot written on unload + timer; open = load snapshot → `Y.applyUpdate` → room syncs |
 
 ## 4. Prisma 7 runtime notes

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { prisma } from "@comata/db";
-import { NotebookCreateRequest, NotebookRenameRequest } from "@comata/schema";
+import { NotebookCreateRequest, NotebookRenameRequest, NotebookSettingsPatch } from "@comata/schema";
 import { getSessionUser } from "../session";
 
 type Variables = { userId: string };
@@ -21,11 +21,15 @@ notebookRoutes.use("*", async (c, next) => {
   await next();
 });
 
-function toSummary(notebook: { id: string; title: string; kind: string; updatedAt: Date }, role: string) {
+function toSummary(
+  notebook: { id: string; title: string; kind: string; background: string; updatedAt: Date },
+  role: string,
+) {
   return {
     id: notebook.id,
     title: notebook.title,
     kind: notebook.kind,
+    background: notebook.background,
     role,
     updatedAt: notebook.updatedAt.toISOString(),
   };
@@ -53,7 +57,12 @@ notebookRoutes.post("/", async (c) => {
   const userId = c.get("userId");
   const notebook = await prisma.$transaction(async (tx) => {
     const nb = await tx.notebook.create({
-      data: { title: parsed.data.title, kind: parsed.data.kind, ownerId: userId },
+      data: {
+        title: parsed.data.title,
+        kind: parsed.data.kind,
+        background: parsed.data.background,
+        ownerId: userId,
+      },
     });
     await tx.notebookMember.create({
       data: { notebookId: nb.id, userId, role: "OWNER" },
@@ -164,4 +173,48 @@ notebookRoutes.get("/:id/snapshot", async (c) => {
   return c.body(notebook.yjsSnapshot, 200, {
     "Content-Type": "application/octet-stream",
   });
+});
+
+/** GET /:id/settings — notebook settings (any member; viewers read for Run UX). */
+notebookRoutes.get("/:id/settings", async (c) => {
+  const notebookId = c.req.param("id");
+  const userId = c.get("userId");
+  const membership = await prisma.notebookMember.findUnique({
+    where: { notebookId_userId: { notebookId, userId } },
+  });
+  if (!membership) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  const notebook = await prisma.notebook.findUnique({
+    where: { id: notebookId },
+    select: { allowViewerRuns: true },
+  });
+  if (!notebook) {
+    return c.json({ error: "not found" }, 404);
+  }
+  return c.json({ allowViewerRuns: notebook.allowViewerRuns });
+});
+
+/** PATCH /:id/settings — owner-managed notebook settings (ADR-0003). */
+notebookRoutes.patch("/:id/settings", async (c) => {
+  const notebookId = c.req.param("id");
+  const userId = c.get("userId");
+  const parsed = NotebookSettingsPatch.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: "invalid request" }, 400);
+  }
+  const membership = await prisma.notebookMember.findUnique({
+    where: { notebookId_userId: { notebookId, userId } },
+  });
+  if (!membership || membership.role !== "OWNER") {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  const notebook = await prisma.notebook.update({
+    where: { id: notebookId },
+    data: {
+      ...(parsed.data.allowViewerRuns !== undefined ? { allowViewerRuns: parsed.data.allowViewerRuns } : {}),
+    },
+    select: { allowViewerRuns: true },
+  });
+  return c.json({ allowViewerRuns: notebook.allowViewerRuns });
 });

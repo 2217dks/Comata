@@ -8,8 +8,7 @@
 Comata/
 ├── apps/
 │   ├── web/        # Vite + React SPA: editor, dashboard (deploy: Vercel/Netlify static)
-│   ├── api/        # Hono serverless: REST + Liveblocks auth endpoint + /enqueue proxy
-│   └── worker/     # BullMQ worker: Valkey queue → Judge0 → Supabase (deploy: VPS)
+│   ├── api/        # Hono serverless: REST + Liveblocks auth + /runs (sync → Piston)
 ├── packages/
 │   ├── schema/     # Zod: element payloads, API contracts, env loading — shared everywhere
 │   ├── elements/   # element types + geometry helpers + doc projection + schema migrations
@@ -18,7 +17,7 @@ Comata/
 │   ├── canvas/     # react-konva renderer: consumes projected doc view only
 │   ├── math-engine/# math.js eval/compile + MathBox viz, behind one interface
 │   └── ui/         # shared React components (toolbar, panels, dialogs)
-├── infra/          # docker-compose for VPS (Valkey + worker + Judge0), deploy scripts
+├── infra/          # runner host deploy scripts (Piston container + reverse proxy)
 ├── docs/           # this doc set
 ├── docs-future-implementation/  # archived production docs (git-ignored)
 ├── IDEA.md
@@ -35,7 +34,7 @@ Comata/
 | Presence (cursors, viewport, follow) | Liveblocks awareness | ephemeral |
 | Users, sessions | Better-Auth (Prisma 7 models) | Supabase |
 | Notebook rows, membership/roles | Prisma (`Notebook`, `NotebookMember`) | Supabase |
-| Code execution results | Prisma (`CodeRun`) + Liveblocks room event for live push | Supabase |
+| Code execution results | **nowhere** — per-user, ephemeral, response-only (ADR-0003) | — |
 | Images, thumbnails | Supabase Storage (content-hashed) | — |
 | **Whole-notebook portability** | `packages/format` → `.comata` file (manifest + doc.yjs + assets) | user's disk |
 
@@ -51,16 +50,19 @@ client ──Yjs update──► Liveblocks room ──► fan-out to peers + pe
 ```
 Liveblocks auth endpoint in `apps/api` issues room tokens, checking `NotebookMember.role` via Prisma. Viewer role → read-only room token.
 
-### 3.2 Run code (execute path)
+### 3.2 Run code (execute path — per-user, ephemeral; ADR-0002/0003)
 ```
-Run click → apps/api POST /v1/runs
-  → Zod-validate payload, check editor role
-  → POST https://<vps>/enqueue (shared token)        # api never touches Valkey
-     → VPS worker: BullMQ job → Judge0 POST /submissions
-        → result → Prisma CodeRun row
-        → Liveblocks room event `run:done:{elementId}` → clients update panes
+Run click → apps/api POST /v1/runs (Better-Auth session required)
+  → check notebook role + allowViewerRuns setting
+  → in-memory checks: per-user run lock (one in-flight run per user,
+    notebook-wide) + per-user rate limit (5/min → RATE_LIMITED + retryAfter)
+  → POST to self-hosted Piston (dev backend: the developer's Mac)   # sync call
+     → result {stdout, stderr, exitCode, time} returned in the HTTP response
 ```
-Idempotency: one run per element at a time — worker rejects a second job for the same element while one is in flight (per-element lock key in Valkey).
+No queue, no worker, no Valkey, no persistence, no Liveblocks involvement:
+results go only to the requester and are never stored. Viewers may run only
+when the notebook's `allowViewerRuns` setting is on. The runner sits behind
+`packages/runner` (Piston now, Judge0 later touches one module).
 
 ### 3.3 Present / follow mode
 Presenter writes camera transform to Liveblocks awareness under `camera` key; viewers in follow mode apply it. No API calls.
@@ -78,8 +80,8 @@ No new backend surface: export/import is client-side over existing APIs (Storage
 ## 4. Security notes (MVP-grade, not paranoia-grade)
 
 - All secrets in env (see `setup.md`); no secrets in the SPA bundle — client only ever holds `VITE_`-prefixed public keys (Liveblocks public key is not enough by itself: room tokens come from the API).
-- `/enqueue` endpoint: bearer token + Hono-issued HMAC payload (docId, elementId, userId, role) — the VPS never trusts the client.
-- Judge0 bound to localhost on the VPS; language timeouts + CPU/memory limits per submission.
+- `/runs`: auth required (Better-Auth session); role + `allowViewerRuns` checked; per-user run lock + rate limit in memory. The runner host is never exposed to clients.
+- Piston bound to localhost on the runner host; global caps (10s wall / 512MB) per submission.
 - Liveblocks room naming: `notebook:{Notebook.id}` — token check guarantees membership.
 
 ## 5. Deployment
@@ -88,6 +90,6 @@ No new backend surface: export/import is client-side over existing APIs (Storage
 |---|---|---|
 | `apps/web` | Vercel/Netlify | static build on push to `main` |
 | `apps/api` | Vercel/Netlify | Node serverless functions (Hono `handle` adapter) |
-| `apps/worker` + Valkey + Judge0 | VPS | `infra/docker-compose.yml`, deployed via SSH script in CI |
+| Piston (runner) | cheap VPS (dev: the Mac) | Docker container, localhost-bound + reverse proxy — only at MVP deploy |
 
-`infra/` contains: compose file (Valkey, worker, Judge0 CE), Caddy (TLS for the enqueue endpoint), and a bootstrap script. Keep it boring.
+`infra/` contains: runner host deploy script + reverse-proxy config. Keep it boring.

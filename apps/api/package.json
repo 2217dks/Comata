@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@comata/db": "workspace:*",
+    "@comata/runner": "workspace:*",
     "@comata/schema": "workspace:*",
     "@liveblocks/node": "^3.24.4",
     "better-auth": "^1.7.12",

@@ -3,9 +3,11 @@ import { cors } from "hono/cors";
 import { Liveblocks } from "@liveblocks/node";
 import { APP_NAME, HealthResponse, LiveblocksAuthRequest } from "@comata/schema";
 import { prisma } from "@comata/db";
-import { auth, WEB_ORIGIN } from "./auth";
+import { auth, WEB_ORIGINS } from "./auth";
 import { getSessionUser } from "./session";
 import { notebookRoutes } from "./routes/notebooks";
+import { runRoutes } from "./routes/runs";
+import { aiRoutes } from "./routes/ai";
 
 export const API_VERSION = "0.3.0";
 
@@ -26,7 +28,7 @@ const app = new Hono().basePath("/v1");
 app.use(
   "*",
   cors({
-    origin: WEB_ORIGIN,
+    origin: [...WEB_ORIGINS],
     credentials: true,
   }),
 );
@@ -36,8 +38,14 @@ app.get("/health", (c) => c.json(health));
 // ── Better-Auth (Slice 2): sign-up / sign-in / sign-out / session ───────────
 app.on(["POST", "GET"], "/auth/**", (c) => auth.handler(c.req.raw));
 
-// ── Notebooks (Slice 2): CRUD + snapshots, membership-enforced ──────────────
+// ── Notebooks (Slice 2): CRUD + snapshots + settings, membership-enforced ───
 app.route("/notebooks", notebookRoutes);
+
+// ── Code runs (Slice 4): per-user, ephemeral, sync Piston (ADR-0002/0003) ───
+app.route("/runs", runRoutes);
+
+// ── AI generation (Slice 5b): allowlist-gated, server's own key (ADR-0004) ──
+app.route("/ai", aiRoutes);
 
 // ── Liveblocks room auth (Slice 2: signed-in members only) ──────────────────
 // Room ids follow `notebook:{Notebook.id}`; roles map to scopes (rule #2):

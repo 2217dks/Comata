@@ -45,6 +45,6 @@ Both include their own `vercel.json` — no build config needed in the dashboard
 |---|---|
 | 1 | `VITE_LIVEBLOCKS_PUBLIC_KEY` (web), `LIVEBLOCKS_SECRET_KEY` (api) |
 | 2 | Supabase URLs, `BETTER_AUTH_SECRET`, Prisma `migrate deploy` in api build |
-| 4 | VPS: Valkey + Judge0 + worker + Caddy (`infra/`, see `setup.md` §4) |
+| 4 | Runner host: Piston container + reverse proxy (`infra/`, see `setup.md` §4) — only at MVP deploy |
 
 Full env reference: `.env.example`.

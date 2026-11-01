@@ -36,7 +36,7 @@ Every element: drag, resize, select, delete, duplicate, z-order. Per-type payloa
 | **Ink** | pen + highlighter, pressure-optional, color/width | `ink` |
 | **Shapes** | rect, ellipse, line, arrow, sticky note | `shape` |
 | **Text** | basic styling (bold/italic/size/color) + inline LaTeX via KaTeX | `text` |
-| **Code** | CodeMirror editor, language picker (Python/JS/TS/C/C++/Java/Rust/Go), stdin box, Run → Judge0, stdout/stderr/exit/time pane, persisted last output | `code` |
+| **Code** | In-element CodeMirror editor, auto-named file (e.g. `Untitled-1.py`), language selector (runner-provided runtimes), RUN button, always-visible Input/Output/Error tabs, per-user stdin + output (never shared/persisted), Run → self-hosted Piston | `code` |
 | **Math equation/graph** | 2D `y=f(x)` plot with live re-plot, parameter sliders; 3D surface `z=f(x,y)` via MathBox; standalone equation rendering via KaTeX | `math` |
 | **Interactive visualizer** | MathBox-driven 2D/3D scene from declarative config (expression + camera + sliders) — rebuilds itself on import | `math` (viz payload) |
 | **Frame** | named rectangle = camera stop (canvas kind) / page container (presentation kind) | `frame` |
@@ -53,10 +53,13 @@ Every element: drag, resize, select, delete, duplicate, z-order. Per-type payloa
 - [ ] Better-Auth (Prisma 7 adapter): email+password, Google OAuth, magic link
 - [ ] Ownership enforced at the API boundary (Hono middleware) and at Liveblocks auth
 
-### Code execution pipeline
-- [ ] Judge0 CE on VPS, 8-language matrix, per-run timeout + memory caps
-- [ ] Flow: Run button → Hono `/enqueue` → VPS worker → Judge0 → result persisted → client receives via Liveblocks room event
-- [ ] Execution history (last N runs) per code element
+### Code execution pipeline (per-user, ephemeral — ADR-0002/0003)
+- [ ] Self-hosted Piston (single Docker container; dev backend = dev Mac), behind `packages/runner` interface
+- [ ] Flow: Run button → `POST /v1/runs` → in-memory run lock + rate limit (5/min/user) → Piston → result in the HTTP response
+- [ ] Global caps: 10s wall / 512MB; runtimes list fetched from the runner
+- [ ] Per-user stdin (local only, never shared/exported); code + filename + language shared via Yjs
+- [ ] `allowViewerRuns` notebook setting (owner toggle in settings; viewers run when on)
+- [ ] Editor stays editable during a run; Run button states: idle → spinner → result / rate-limited countdown
 
 ## Explicitly deferred (do NOT build in MVP)
 

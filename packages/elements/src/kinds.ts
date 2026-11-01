@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 // ── Element shell + payloads ─────────────────────────────────────────────────
-// Uniform geometry shell (id/kind/x/y/w/h/rotation/z) with per-kind payload
-// fields (docs: element model invariant, RFC-001 spirit). Never reshape the
-// shell — new kinds only extend the discriminated union.
+// Uniform geometry shell (id/kind/x/y/w/h/rotation/z/pageId) with per-kind
+// payload fields (docs: element model invariant, RFC-001 spirit; ADR-0005 for
+// the pageId reshape). New kinds only extend the discriminated union.
 
 export const ELEMENT_KINDS = [
   "rect",
@@ -13,8 +13,9 @@ export const ELEMENT_KINDS = [
   "sticky",
   "ink",
   "text",
-  "frame",
   "custom",
+  "code",
+  "math",
 ] as const;
 export type ElementKind = (typeof ELEMENT_KINDS)[number];
 
@@ -27,6 +28,9 @@ const ElementBase = z.object({
   h: z.number(),
   rotation: z.number().default(0),
   z: z.number().default(0),
+  /** Owning page in presentation notebooks (ADR-0005). Canvas-notebook
+   * elements leave it "" — the canvas has no pages. */
+  pageId: z.string().default(""),
   fill: z.string().default("#6c8cff"),
   stroke: z.string().default("#e7eaf0"),
   strokeWidth: z.number().default(2),
@@ -80,17 +84,14 @@ export const TextElement = ElementBase.extend({
   valign: z.enum(["top", "middle", "bottom"]).default("top"),
 });
 
-export const FrameElement = ElementBase.extend({
-  kind: z.literal("frame"),
-  name: z.string().default("Frame"),
-});
-
 /**
  * Custom element (Slice 5b): an AI-generated micro-simulation described in
  * natural language. `prompt` is the user's NL description; `spec` carries the
- * versioned generated payload (JSON spec or sandboxed HTML/JS) that renders
- * the interactive visualization. Shared via the Yjs doc like any element, so
- * snapshots and `.comata` export/import carry it for free.
+ * versioned generated payload — a single self-contained HTML file rendered
+ * sandboxed via iframe srcdoc. Shared via the Yjs doc like any element, so
+ * snapshots and `.comata` export/import carry it for free. `status` rides the
+ * doc too: the wavy generating box is visible to every viewer; spec/HTML and
+ * error text are plain shared fields (per docs/custom-elements.md §4).
  */
 export const CustomElement = ElementBase.extend({
   kind: z.literal("custom"),
@@ -98,6 +99,60 @@ export const CustomElement = ElementBase.extend({
   prompt: z.string().default(""),
   spec: z.string().default(""),
   specVersion: z.number().default(0),
+  status: z.enum(["generating", "ready", "error"]).default("ready"),
+  errorMessage: z.string().default(""),
+  description: z.string().default(""),
+  /** Row id in the generator's account library (GeneratedElement), when the
+   * element was spawned from a generation this user performed. */
+  libraryId: z.string().default(""),
+});
+
+/**
+ * Code element (Slice 4): one named single-file program. Source, filename and
+ * language are shared via the doc and collaboratively editable; stdin and run
+ * results are per-user, local-only and never enter the doc (ADR-0003).
+ * `scale` is the element-wide text zoom stepped by the [- +] control.
+ */
+export const CodeElement = ElementBase.extend({
+  kind: z.literal("code"),
+  filename: z.string().default(""),
+  language: z.string().default("python"),
+  source: z.string().default(""),
+  scale: z.number().default(1),
+});
+
+/** One row of the math element's Desmos-lite expression sidebar. Shared via
+ * the doc; `color` is a fixed palette index chosen at row creation. */
+export const MathExpression = z.object({
+  id: z.string(),
+  text: z.string().default(""),
+  color: z.string().default("#6c8cff"),
+  visible: z.boolean().default(true),
+});
+
+/** Slider definition for a free variable discovered in an expression. Defaults
+ * are shared via the doc; the live slider value is per-user local (ADR-0003
+ * pattern — same split as stdin). */
+export const MathParam = z.object({
+  name: z.string(),
+  min: z.number().default(-10),
+  max: z.number().default(10),
+  step: z.number().default(0.1),
+  defaultValue: z.number().default(1),
+});
+
+/**
+ * Math element ("mathblock", Slice 5): a Desmos-lite block — expression
+ * sidebar + plot. `mode` is mutable (2D↔3D toggle in the element chrome);
+ * one-variable expressions plot as a curve-on-plane in 3D, two-variable
+ * `z=f(x,y)` as a shaded surface. View state (pan/zoom/rotate) is per-user
+ * local and never enters the doc.
+ */
+export const MathElement = ElementBase.extend({
+  kind: z.literal("math"),
+  mode: z.enum(["2d", "3d"]).default("2d"),
+  expressions: z.array(MathExpression).default([]),
+  params: z.array(MathParam).default([]),
 });
 
 export const BoardElementSchema = z.discriminatedUnion("kind", [
@@ -108,8 +163,9 @@ export const BoardElementSchema = z.discriminatedUnion("kind", [
   StickyElement,
   InkElement,
   TextElement,
-  FrameElement,
   CustomElement,
+  CodeElement,
+  MathElement,
 ]);
 export type BoardElement = z.infer<typeof BoardElementSchema>;
 export type RectShape = z.infer<typeof RectElement>;
@@ -119,8 +175,11 @@ export type ArrowShape = z.infer<typeof ArrowElement>;
 export type StickyShape = z.infer<typeof StickyElement>;
 export type InkShape = z.infer<typeof InkElement>;
 export type TextShape = z.infer<typeof TextElement>;
-export type FrameShape = z.infer<typeof FrameElement>;
 export type CustomShape = z.infer<typeof CustomElement>;
+export type CodeShape = z.infer<typeof CodeElement>;
+export type MathShape = z.infer<typeof MathElement>;
+export type MathExpressionRow = z.infer<typeof MathExpression>;
+export type MathParamDef = z.infer<typeof MathParam>;
 
 /** Patch shape for element updates (id/kind immutable). Distributed over the
  * union so per-kind payload fields (text, fontSize, points, …) are patchable. */
@@ -243,24 +302,29 @@ export function createTextElement(id: string, x: number, y: number, z: number): 
   });
 }
 
-export function createFrameElement(
-  id: string,
-  x: number,
-  y: number,
-  z: number,
-  name?: string,
-): FrameShape {
-  return FrameElement.parse({
-    id,
-    kind: "frame",
-    x,
-    y,
-    w: 400,
-    h: 300,
-    z,
-    fill: "#171b24",
-    name: name ?? "Frame",
-  });
+// ── Background-aware defaults (ADR-0006 companion) ──────────────────────────
+// Element default colors derive from the surface's background luminance:
+// light background → dark ink/text, dark background → light. The surface is
+// a page (presentation notebooks) or the notebook background (canvas).
+
+/** Relative luminance (0 dark … 1 light) of a #rrggbb color. */
+export function luminance(hex: string): number {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m || !m[1]) return 0; // unparsable → treat as dark
+  const n = parseInt(m[1], 16);
+  // Rec. 709 coefficients on the sRGB channels.
+  return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 0xff) + 0.0722 * (n & 0xff)) / 255;
+}
+
+export function isLightBackground(bg: string): boolean {
+  return luminance(bg) >= 0.5;
+}
+
+/** Ink/text stroke + fill defaults for a background. */
+export function elementDefaultsFor(bg: string): { ink: string; text: string; shapeStroke: string } {
+  return isLightBackground(bg)
+    ? { ink: "#1a1d24", text: "#1a1d24", shapeStroke: "#2a2e38" }
+    : { ink: "#e7eaf0", text: "#e7eaf0", shapeStroke: "#e7eaf0" };
 }
 
 export function createCustomElement(
@@ -268,7 +332,14 @@ export function createCustomElement(
   x: number,
   y: number,
   z: number,
-  init?: { title?: string; prompt?: string; spec?: string },
+  init?: {
+    title?: string;
+    prompt?: string;
+    spec?: string;
+    status?: "generating" | "ready" | "error";
+    libraryId?: string;
+    description?: string;
+  },
 ): CustomShape {
   return CustomElement.parse({
     id,
@@ -283,10 +354,104 @@ export function createCustomElement(
     title: init?.title ?? "Custom element",
     prompt: init?.prompt ?? "",
     spec: init?.spec ?? "",
+    status: init?.status ?? "ready",
+    libraryId: init?.libraryId ?? "",
+    description: init?.description ?? "",
   });
 }
 
 /** Clone with a new id, top z, and a small offset (duplicate interaction). */
 export function cloneElement<T extends BoardElement>(el: T, id: string, z: number): T {
   return { ...el, id, z, x: el.x + 16, y: el.y + 16 };
+}
+
+// ── Code element naming (VS Code "Untitled-N" pattern) ──────────────────────
+
+export const CODE_LANGUAGE_EXTENSIONS: Record<string, string> = {
+  python: "py",
+  javascript: "js",
+  typescript: "ts",
+  c: "c",
+  cpp: "cpp",
+  java: "java",
+  rust: "rs",
+  go: "go",
+};
+
+export function codeExtensionFor(language: string): string {
+  return CODE_LANGUAGE_EXTENSIONS[language] ?? "txt";
+}
+
+/** Display name for a code element: the stored filename, or the canonical
+ * `Untitled-N.ext` derived from the language when unset. */
+export function codeDisplayName(el: { filename: string; language: string; id?: string }): string {
+  if (el.filename) return el.filename;
+  const n = el.id ? Number.parseInt(el.id.slice(-6), 36) : NaN;
+  const seq = Number.isFinite(n) ? Math.abs(n) % 1000 : 0;
+  return `Untitled-${seq}.${codeExtensionFor(el.language)}`;
+}
+
+/** ElementPatch-friendly rename: keeps the bare name, swaps the extension to
+ * match the language. "init" + cpp → "init.cpp". */
+export function codeFileNameFor(name: string, language: string): string {
+  const bare = name.replace(/\.[^.]+$/, "").trim() || "Untitled";
+  return `${bare}.${codeExtensionFor(language)}`;
+}
+
+export function createCodeElement(
+  id: string,
+  x: number,
+  y: number,
+  z: number,
+  init?: { language?: string; filename?: string; source?: string },
+): CodeShape {
+  return CodeElement.parse({
+    id,
+    kind: "code",
+    x,
+    y,
+    w: 460,
+    h: 420,
+    z,
+    fill: "#161a23",
+    stroke: "#3a4256",
+    language: init?.language ?? "python",
+    filename: init?.filename ?? "",
+    source: init?.source ?? "",
+  });
+}
+
+/** Curve palette cycled per expression row, Desmos-style. */
+export const MATH_CURVE_COLORS = [
+  "#6c8cff",
+  "#e879a9",
+  "#38bdf8",
+  "#f59e0b",
+  "#34d399",
+  "#a78bfa",
+] as const;
+
+export function createMathElement(
+  id: string,
+  x: number,
+  y: number,
+  z: number,
+  init?: { mode?: "2d" | "3d" },
+): MathShape {
+  return MathElement.parse({
+    id,
+    kind: "math",
+    x,
+    y,
+    w: 520,
+    h: 440,
+    z,
+    fill: "#ffffff",
+    stroke: "#e7eaf0",
+    mode: init?.mode ?? "2d",
+    expressions: [
+      { id: `${id}-e1`, text: "sin(x)", color: MATH_CURVE_COLORS[0], visible: true },
+    ],
+    params: [],
+  });
 }
